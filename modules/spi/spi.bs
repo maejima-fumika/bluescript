@@ -1,4 +1,4 @@
-import { GPIO } from 'gpio'; 
+// import { GPIO } from 'gpio'; 
 import type { integer } from '../../bs-utils';
 
 const a = new Uint8Array(3, 7)
