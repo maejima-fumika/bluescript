@@ -1,34 +1,32 @@
-// import { GPIO } from 'gpio'; 
+import { GPIO } from 'gpio'; 
 import type { integer } from '../../bs-utils';
 
-const a = new Uint8Array(3, 7)
-a[0] = 13
 
-// export class SPI {
-//     baudrate: integer;
-//     sck: GPIO;
-//     mosi: GPIO;
-//     miso: GPIO;
+export class SPI {
+    baudrate: integer;
+    sck: GPIO;
+    mosi: GPIO;
+    miso: GPIO;
 
-//     constructor(baudrate: integer, sck: GPIO, mosi: GPIO, miso: GPIO) {
-//         this.baudrate = baudrate;
-//         this.sck = sck;
-//         this.mosi = mosi;
-//         this.miso = miso;
-//     }
+    constructor(baudrate: integer, sck: GPIO, mosi: GPIO, miso: GPIO) {
+        this.baudrate = baudrate;
+        this.sck = sck;
+        this.mosi = mosi;
+        this.miso = miso;
+    }
 
-//     init() {}
+    init() {}
 
-//     deinit() {}
+    deinit() {}
 
-//     write(buffer: Uint8Array) {
+    write(buffer: Uint8Array) {
         
-//     }
+    }
 
-//     writeCmd(cmd: integer) {
-//     }
+    writeCmd(cmd: integer) {
+    }
 
-//     read(nbyte: integer, cmd: integer):Uint8Array {
-//         return new Uint8Array(0, 0);
-//     }
-// }
+    read(nbyte: integer, cmd: integer):Uint8Array {
+        return new Uint8Array(0, 0);
+    }
+}

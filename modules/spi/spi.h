@@ -1,5 +1,5 @@
-#ifndef __BS_GPIO__
-#define __BS_GPIO__
+#ifndef __BS_Display__
+#define __BS_Display__
 
 #include "c-runtime.h"
 
@@ -14,4 +14,4 @@ extern class_103112105111GPIO_t class_103112105111GPIO;
 
 void bluescript_main0_103112105111();
 
-#endif /* __BS_GPIO__ */
+#endif /* __BS_Display__ */
