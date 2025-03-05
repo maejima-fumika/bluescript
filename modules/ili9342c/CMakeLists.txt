@@ -1,6 +1,6 @@
-idf_component_register(SRCS "timer.c"
+idf_component_register(SRCS "ili9342c.c"
                     INCLUDE_DIRS "."
-                    REQUIRES core
+                    REQUIRES core driver gpio spi
                     # WHOLE_ARCHIVE
                     )
 

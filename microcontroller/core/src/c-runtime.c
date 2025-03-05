@@ -80,7 +80,7 @@ static inline value_t raw_ptr_to_value(const void* v) { return (value_t)v; }
 
 #endif /* TEST64 */
 
-#define HEAP_SIZE       (1024 * 8 + 2) // words (even number)
+#define HEAP_SIZE       (1024 * 16 + 2) // words (even number)
 
 static value_t heap_memory[HEAP_SIZE];
 

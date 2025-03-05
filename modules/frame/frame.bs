@@ -1,0 +1,90 @@
+import type {integer} from "../../bs-utils"
+
+export class RGB565 {
+    red: integer;
+    green: integer;
+    blue: integer
+
+    constructor(red: integer, green:integer, blue:integer) {
+        this.red = red;
+        this.green = green;
+        this.blue = blue;
+    }
+
+    getColor():integer {
+        let color = 0;
+        color |= ((this.red >> 3) << 11);
+        color |= ((this.green >> 2) << 5);
+        color |= ((this.blue >> 3) << 0);
+        color = (color >> 8) | (color << 8); // big-endian
+        return color;
+    }
+}
+
+class Layer {
+    constructor() {}
+    generate(buff: Uint8Array, x0:integer, y0:integer, x1:integer, y1:integer) {}
+}
+
+class FilledCircle extends Layer {
+    x:integer;
+    y:integer;
+    r:integer;
+    color: RGB565;
+
+    constructor(x:integer, y:integer, r:integer, color: RGB565) {
+        super();
+        this.x = x;
+        this.y = y;
+        this.r = r;
+        this.color = color;
+    }
+
+    generate(buff: Uint8Array, x0: integer, y0: integer, x1: integer, y1: integer) {
+        let buffWidth = x1 - x0;
+        let buffHeight = y1 - y0;
+        let centerX = this.x;
+        let centerY = this.y;
+        let radius = this.r;
+        let color = this.color.getColor();
+        for (let y = 0; y < buffHeight; y++) {
+            for (let x = 0; x < buffWidth; x++) {
+                if ((x + x0 - centerX) * (x + x0 - centerX) + (y + y0 - centerY) * (y + y0 - centerY) < radius * radius)
+                    buff[y * buffWidth + x] = color;
+            }
+        }
+    }
+}
+
+export class FrameBuffer {
+    layers: Layer[];
+    nextLayerIndex: integer;
+    background: RGB565;
+
+
+    constructor(background: RGB565, numOfLayers:integer) {
+        this.background = background;
+        this.layers = new Array<Layer>(numOfLayers, new Layer());
+        this.nextLayerIndex = 0;
+    }
+
+    filledCircle(x:integer, y:integer, r:integer, color: RGB565) {
+        this.layers[this.nextLayerIndex] = new FilledCircle(x, y, r, color);
+    }
+
+    generate(x0:integer, y0:integer, x1:integer, y1:integer) {
+        const cellNum = (x1 - x0 + 1) * (y1 - y0 + 1);
+        const backgroundColor = this.background.getColor();
+        let buff = new Uint8Array(cellNum * 2, 0);
+        for (let i = 0; i < cellNum; i++) {
+            buff[i * 2] = backgroundColor >> 8;
+            buff[i * 2 + 1] = backgroundColor & 0xff;
+        }
+        // for (let i = 0; i < this.nextLayerIndex; i++) {
+        //     this.layers[i].generate(buff, x0, x1, y0, y1);
+        // }
+        return buff;
+    }
+
+    clear() {}
+}

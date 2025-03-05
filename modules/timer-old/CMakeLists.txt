@@ -1,6 +1,6 @@
 idf_component_register(SRCS "timer.c"
                     INCLUDE_DIRS "."
-                    REQUIRES core
+                    REQUIRES core driver main
                     # WHOLE_ARCHIVE
                     )
 

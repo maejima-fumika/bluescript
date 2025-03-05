@@ -10,7 +10,9 @@ set(EXTRA_COMPONENT_DIRS
         "../../../modules/gpio" 
         "../../../modules/timer" 
         "../../../modules/display"
-        "../../../modules/button"
+        "../../../modules/spi"
+        "../../../modules/ili9342c"
+        "../../../modules/frame"
     )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

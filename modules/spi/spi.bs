@@ -1,32 +1,112 @@
-import { GPIO } from 'gpio'; 
+import { GPIO, GPIO_OUTPUT } from 'gpio'; 
 import type { integer } from '../../bs-utils';
+// import {code} from '../../bs-utils';
 
+code`
+#include <string.h>
+#include "driver/spi_master.h"
+`
 
 export class SPI {
-    baudrate: integer;
-    sck: GPIO;
-    mosi: GPIO;
-    miso: GPIO;
+    dc: GPIO;
+    internal_spi: any;
 
-    constructor(baudrate: integer, sck: GPIO, mosi: GPIO, miso: GPIO) {
-        this.baudrate = baudrate;
-        this.sck = sck;
-        this.mosi = mosi;
-        this.miso = miso;
-    }
+    constructor(baudrate: integer, mode: integer, max_transfer_size: integer, sck: integer, mosi: integer, miso: integer, cs: integer, dc: integer) {
+        this.dc = new GPIO(dc, GPIO_OUTPUT);
+        this.internal_spi = 0;
+        code`
+    value_t spi_device_obj = gc_new_bytearray(false, sizeof(spi_device_handle_t), 0);
+    set_obj_property(self, 1, spi_device_obj);
+    spi_device_handle_t* spi_device = (spi_device_handle_t*)&(value_to_ptr(spi_device_obj))->body[2];
+    esp_err_t ret;
+    spi_bus_config_t buscfg={
+        .miso_io_num=_miso,
+        .mosi_io_num=_mosi,
+        .sclk_io_num=_sck,
+        .quadwp_io_num=-1,
+        .quadhd_io_num=-1,
+        .max_transfer_sz=_max_transfer_size
+    };
+    spi_device_interface_config_t devcfg={
+        .clock_speed_hz=_baudrate,
+        .mode=_mode,
+        .spics_io_num=_cs,
+        .queue_size=7, 
+    };
+    //Initialize the SPI bus
+    ret=spi_bus_initialize(HSPI_HOST, &buscfg, 2);
+    ESP_ERROR_CHECK(ret);
+    //Attach the LCD to the SPI bus
+    ret=spi_bus_add_device(HSPI_HOST, &devcfg, spi_device);
 
-    init() {}
-
-    deinit() {}
-
-    write(buffer: Uint8Array) {
-        
+    ESP_ERROR_CHECK(ret);`
     }
 
     writeCmd(cmd: integer) {
+    this.dc.off();
+        code`
+    value_t spi_device_obj = get_obj_property(self, 1);
+    spi_device_handle_t* spi_device = (spi_device_handle_t*)&(value_to_ptr(spi_device_obj))->body[2];
+    esp_err_t ret;
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));       //Zero out the transaction
+    t.length=8;                     //Command is 8 bits
+    t.tx_buffer=&_cmd;               //The data is the cmd itself
+    ret=spi_device_polling_transmit(*spi_device, &t);  //Transmit!
+    ESP_ERROR_CHECK(ret);
+        `
+    }
+
+    writeData(data: Uint8Array) {
+        this.dc.on();
+        const data_len = data.length;
+        code`
+    value_t spi_device_obj = get_obj_property(self, 1);
+    spi_device_handle_t* spi_device = (spi_device_handle_t*)&(value_to_ptr(spi_device_obj))->body[2];
+    uint8_t* data = (uint8_t*)&(value_to_ptr(func_rootset.values[1]))->body[2];
+    esp_err_t ret;
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));       //Zero out the transaction
+    t.length=_data_len * 8;         //Len is in bytes, transaction length is in bits.
+    t.tx_buffer=data;
+    ret=spi_device_polling_transmit(*spi_device, &t);  //Transmit!
+    ESP_ERROR_CHECK(ret);
+        `
     }
 
     read(nbyte: integer, cmd: integer):Uint8Array {
-        return new Uint8Array(0, 0);
+        let result: Uint8Array = new Uint8Array(nbyte, 0);
+        code`
+    // When using SPI_TRANS_CS_KEEP_ACTIVE, bus must be locked/acquired
+    value_t spi_device_obj = get_obj_property(self, 1);
+    spi_device_handle_t* spi_device = (spi_device_handle_t*)&(value_to_ptr(spi_device_obj))->body[2];
+    spi_device_acquire_bus(*spi_device, portMAX_DELAY);
+    `
+
+    this.dc.off();
+        code`
+    spi_transaction_t t1;
+    memset(&t1, 0, sizeof(t1));       //Zero out the transaction
+    t1.length=8;                     //Command is 8 bits
+    t1.tx_buffer=&_cmd;               //The data is the cmd itself
+    t1.flags = SPI_TRANS_CS_KEEP_ACTIVE;   //Keep CS active after data transfer
+    esp_err_t ret1 = spi_device_polling_transmit(*spi_device, &t1);  //Transmit!
+    ESP_ERROR_CHECK(ret1);            //Should have had no issues.
+    `
+
+    this.dc.on();
+        code`
+    spi_transaction_t t2;
+    memset(&t2, 0, sizeof(t2));
+    t2.length=_nbyte*8;
+    t2.flags = SPI_TRANS_USE_RXDATA;
+    esp_err_t ret2 = spi_device_polling_transmit(*spi_device, &t2);
+    ESP_ERROR_CHECK(ret2);
+
+    // Release bus
+    spi_device_release_bus(*spi_device);
+    memcpy(&(value_to_ptr(spi_device_obj))->body[2], t2.rx_data, _nbyte);
+        `
+    return result;
     }
 }

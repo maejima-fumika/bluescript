@@ -1,0 +1,92 @@
+import { GPIO, GPIO_OUTPUT } from 'gpio'; 
+import { SPI } from 'spi';
+import { waitMs } from 'timer';
+import { FrameBuffer } from 'frame';
+import type { integer } from '../../bs-utils';
+
+
+export const ILI9342C_HEIGHT = 240;
+export const ILI9342C_WIDTH  = 320;
+
+export const MAX_LINE_NUM      = 30;
+export const MAX_TRANSFER_SIZE = ILI9342C_WIDTH * MAX_LINE_NUM * 2 + 8;
+
+const intArrayToUint8Array = (intArray: integer[]) => {
+    const length = intArray.length;
+    const uint8Array = new Uint8Array(length, 0);
+    for (let i = 0; i < length; i++) {
+        uint8Array[i] = intArray[i];
+    }
+    return uint8Array;
+}
+
+export class ILI9342C {
+    spi: SPI;
+
+    constructor(sck: integer, mosi: integer, miso: integer, cs: integer, dc: integer, rst: integer, bckl: integer) {
+        this.spi = new SPI(10*1000*1000, 0, MAX_TRANSFER_SIZE, sck, mosi, miso, cs, dc);
+        const rstPin = new GPIO(rst, GPIO_OUTPUT);
+        const bcklPin = new GPIO(bckl, GPIO_OUTPUT);
+
+        rstPin.off();
+        bcklPin.off();
+        waitMs(100);
+        rstPin.on();
+        waitMs(100);
+
+        // Send all commands.
+        this.spi.writeCmd(0xc0); // Power Control 1
+        this.spi.writeData(intArrayToUint8Array([0x23]));
+        this.spi.writeCmd(0xc1); // Power Control 2
+        this.spi.writeData(intArrayToUint8Array([0x10]));
+        this.spi.writeCmd(0xc5); // VCOM Control 1
+        this.spi.writeData(intArrayToUint8Array([0x3e, 0x28]));
+        this.spi.writeCmd(0xc7); // Set GPIO0-7 Status
+        this.spi.writeData(intArrayToUint8Array([0x86]));
+        this.spi.writeCmd(0x36); // Memory access control  
+        this.spi.writeData(intArrayToUint8Array([0x08]));
+        this.spi.writeCmd(0x3a); // Pixel format = RGB565 (Default is RGB666)
+        this.spi.writeData(intArrayToUint8Array([0x55]));
+        this.spi.writeCmd(0xb1); // Frame rate controll
+        this.spi.writeData(intArrayToUint8Array([0x00, 0x18]));
+        this.spi.writeCmd(0xb6); // Display function control
+        this.spi.writeData(intArrayToUint8Array([0x08, 0x82, 0x27]));
+        this.spi.writeCmd(0xf2); // VCOM Control 1
+        this.spi.writeData(intArrayToUint8Array([0x00]));
+        this.spi.writeCmd(0x26); // Gamma Set
+        this.spi.writeData(intArrayToUint8Array([0x01]));
+        this.spi.writeCmd(0xe0); // Positive gamma correction
+        this.spi.writeData(intArrayToUint8Array([0x0f, 0x31, 0x2b, 0x0c, 0x0e, 0x08, 0x4e, 0xf1, 0x37, 0x07, 0x10, 0x03, 0x0e, 0x09, 0x00]));
+        this.spi.writeCmd(0xe1); // Negative gamma correction
+        this.spi.writeData(intArrayToUint8Array([0x00, 0x0e, 0x14, 0x03, 0x11, 0x07, 0x31, 0xc1, 0x48, 0x08, 0x0f, 0x0c, 0x31, 0x36, 0x0f]));
+        this.spi.writeCmd(0x21); // Display inversion on
+        waitMs(100);
+        this.spi.writeCmd(0x11); // Sleep out
+        waitMs(100);
+        this.spi.writeCmd(0x29); // Display on
+        waitMs(100);
+        bcklPin.on();
+    }
+
+    showFrame(frame: FrameBuffer) {
+        for(let i = 0; i <  ILI9342C_HEIGHT / MAX_LINE_NUM; i++) {
+            const x0 = 0;
+            const y0 = MAX_LINE_NUM * i;
+            const x1 = ILI9342C_WIDTH - 1;
+            const y1 = y0 + MAX_LINE_NUM - 1;
+            const buff = frame.generate(x0, y0, x1, y1);
+            this.showUint8Array(buff, x0, y0, x1, y1);
+        }
+    }
+
+
+    showUint8Array(buff: Uint8Array, x0: integer, y0: integer, x1: integer, y1: integer) {
+        this.spi.writeCmd(0x2a); // Column set
+        this.spi.writeData(intArrayToUint8Array([x0 >> 8, x0 & 0xff, x1 >> 8, x1 & 0xff]));
+        this.spi.writeCmd(0x2b); // Page set
+        this.spi.writeData(intArrayToUint8Array([y0 >> 8, y0 & 0xff, y1 >> 8, y1 & 0xff]));
+        this.spi.writeCmd(0x2c); // RAM write
+        this.spi.writeData(buff);
+    }
+}
+

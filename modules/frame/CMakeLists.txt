@@ -1,7 +1,6 @@
-idf_component_register(SRCS "timer.c"
+idf_component_register(SRCS "frame.c"
                     INCLUDE_DIRS "."
                     REQUIRES core
-                    # WHOLE_ARCHIVE
                     )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -mtext-section-literals)

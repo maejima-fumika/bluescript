@@ -1,6 +1,6 @@
-idf_component_register(SRCS "button.c"
+idf_component_register(SRCS "spi.c"
                     INCLUDE_DIRS "."
-                    REQUIRES core driver main
+                    REQUIRES core driver gpio
                     # WHOLE_ARCHIVE
                     )
 

@@ -1,16 +1,95 @@
 import type {integer} from "../../bs-utils"
 
+code`
+#include "driver/gpio.h"
+`
 
-// export function gpioOn(pin: integer) {}
+
+export const GPIO_INPUT        = 0;
+export const GPIO_OUTPUT       = 1;
+export const GPIO_INPUT_OUTPUT = 2;
+
+export const GPIO_EDGE_RISING  = 13;
+export const GPIO_EDGE_FALLING = 14;
+export const GPIO_EDGE_ANY     = 15;
 
 export class GPIO {
     pin:integer;
+    mode: integer;
 
-    constructor(pin: integer) {
+    constructor(pin: integer, mode: integer) {
+        code`
+        if (_pin >= GPIO_NUM_MAX) {
+            runtime_error("** gpio module error: pin number exceeds the maxmum number of GPIO");
+        } 
+        `
+        if (mode === GPIO_INPUT) {
+            code`
+            gpio_set_direction(_pin, GPIO_MODE_INPUT);
+            `
+        } else if (mode === GPIO_OUTPUT) {
+            code`
+            gpio_set_direction(_pin, GPIO_MODE_OUTPUT);
+            `
+        } else if (mode === GPIO_INPUT_OUTPUT) {
+            code`
+            gpio_set_direction(_pin, GPIO_MODE_INPUT_OUTPUT);
+            `
+        } else {
+            code`
+            runtime_error("** gpio module error: unknown mode.");
+            `
+        }
+
         this.pin = pin;
+        this.mode = mode;
     }
 
-    on() {}
+    write(value: integer) {
+        if (this.mode !== GPIO_OUTPUT && this.mode !== GPIO_INPUT_OUTPUT) {
+            code`
+            runtime_error("** gpio module error: the gpio mode must be GPIO_OUTPUT or GPIO_INPUT_OUTPUT");
+            `
+        }
+        let pin = this.pin;
+        code`
+        gpio_set_level(_pin, _value);
+        `
+    }
 
-    off() {}
+    on() {
+        this.write(1);
+    }
+
+    off() {
+        this.write(0);
+    }
+
+    read():integer {
+        if (this.mode !== GPIO_INPUT && this.mode !== GPIO_INPUT_OUTPUT) {
+            code`
+            runtime_error("** gpio module error: the gpio mode must be GPIO_INPUT or GPIO_INPUT_OUTPUT");
+            `
+        }
+        let result = -1;
+        let pin = this.pin;
+        code`
+        _result = gpio_get_level(_pin);
+        `
+        return result;
+    }
+
+    setInterruptHandler(trigger: integer, handler: (pin: integer) => void) {
+        if (this.mode !== GPIO_INPUT && this.mode !== GPIO_INPUT_OUTPUT) {
+            code`
+            runtime_error("** gpio module error: the gpio mode must be GPIO_INPUT or GPIO_INPUT_OUTPUT");
+            `
+        }
+        // TODO
+    }
+
+    removeInterruptHandler() {
+
+    }
+    
 }

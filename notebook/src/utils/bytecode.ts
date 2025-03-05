@@ -14,6 +14,8 @@ export enum BYTECODE {
 }
 
 const LOAD_HEADER_SIZE = 9;
+const JUMP_SIZE        = 9;
+const RESET_SIZE       = 1;
 
 export class BytecodeBufferBuilder {
     private readonly unitSize:number;
@@ -73,11 +75,13 @@ export class BytecodeBufferBuilder {
         header.writeUIntLE(BYTECODE.JUMP, 0, 1); // cmd
         header.writeIntLE(id, 1, 4); // id
         header.writeUIntLE(address, 5, 4); // address
-        if (5 <= this.lastUnitRemain) {
+        if (JUMP_SIZE <= this.lastUnitRemain) {
             this.lastUnit = Buffer.concat([this.lastUnit, header]);
+            this.lastUnitRemain -= JUMP_SIZE;
         } else {
             this.units.push(this.lastUnit);
             this.lastUnit = header;
+            this.lastUnitRemain = this.unitSize - JUMP_SIZE;
         }
         return this
     }
@@ -85,11 +89,13 @@ export class BytecodeBufferBuilder {
 
     public reset() {
         const header = Buffer.from([BYTECODE.RESET]);
-        if (1 <= this.lastUnitRemain) {
+        if (RESET_SIZE <= this.lastUnitRemain) {
             this.lastUnit = Buffer.concat([this.lastUnit, header]);
+            this.lastUnitRemain -= RESET_SIZE;
         } else {
             this.units.push(this.lastUnit);
             this.lastUnit = header;
+            this.lastUnitRemain = this.unitSize - RESET_SIZE;
         }
         return this
     }
