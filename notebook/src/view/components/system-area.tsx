@@ -16,7 +16,7 @@ export default function SystemArea() {
                     <MemoryData memory={replContext.iram} showFigure={true} />
                     </div>
                     <div style={{marginBottom:20}}>
-                    <MemoryData memory={replContext.dram} showFigure={true} />
+                    <MemoryData memory={replContext.dram} showFigure={false} />
                     </div>
                     <div style={{marginBottom:20}}>
                     <MemoryData memory={replContext.iflash} showFigure={false} />

@@ -69,12 +69,12 @@ export class ILI9342C {
     }
 
     showFrame(frame: FrameBuffer) {
+        const buff = frame.generate(0, 0, ILI9342C_WIDTH - 1, MAX_LINE_NUM - 1);
         for(let i = 0; i <  ILI9342C_HEIGHT / MAX_LINE_NUM; i++) {
             const x0 = 0;
             const y0 = MAX_LINE_NUM * i;
             const x1 = ILI9342C_WIDTH - 1;
             const y1 = y0 + MAX_LINE_NUM - 1;
-            const buff = frame.generate(x0, y0, x1, y1);
             this.showUint8Array(buff, x0, y0, x1, y1);
         }
     }
