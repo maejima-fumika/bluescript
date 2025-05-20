@@ -95,6 +95,7 @@ function ButtonBar() {
             <Button icon={<ReloadOutlined />} size='small' type='text' onClick={replContext.resetStart}>Reset</Button>
             <Button icon={<DownloadOutlined />} size='small' type='text' onClick={replContext.install}>Install</Button>
             <Checkbox onChange={(e)=>replContext.updateUseJIT(e.target.checked)} checked={replContext.useJIT} style={{marginLeft:10}}>Use JIT</Checkbox>
+            <Button icon={<DownloadOutlined />} size='small' type='text' onClick={replContext.consoleExperimentLog}>Console Log</Button>
         </Flex>
     )
 }

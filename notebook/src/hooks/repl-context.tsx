@@ -23,6 +23,7 @@ export type ReplContextT = {
     resetStart: () => Promise<void>,
     executeLatestCell: () => Promise<void>,
     install: () => Promise<void>
+    consoleExperimentLog: ()=>void
 }
 
 export const ReplContext = createContext<ReplContextT>({
@@ -41,7 +42,8 @@ export const ReplContext = createContext<ReplContextT>({
     setLatestCellCode: (code: string) => {},
     resetStart: async () => {},
     executeLatestCell: async () => {},
-    install: async () => {}
+    install: async () => {},
+    consoleExperimentLog: () => {}
 });
 
 export default function ReplProvider({children}: {children: ReactNode}) {
@@ -55,6 +57,7 @@ export default function ReplProvider({children}: {children: ReactNode}) {
     const dram = useMemory('DRAM')
     const iflash = useMemory('Flash')
     const dflash = useMemory('DFlash')
+    const [experimentLog, setExperimentLog] = useState('');
     
     const bluetooth = useRef(new Bluetooth())
 
@@ -76,6 +79,15 @@ export default function ReplProvider({children}: {children: ReactNode}) {
             console.log(error)
             window.alert(`Failed to reset: ${error.message}`)
         }
+    }
+
+    const consoleExperimentLog = () => {
+        console.log(experimentLog);
+        global.navigator.clipboard.writeText(experimentLog);
+    }
+
+    const addExperimentLog = (log: string) => {
+        setExperimentLog((oldLog) => oldLog + log + "\n");
     }
 
     const onResetComplete = (meminfo: MemInfo) => {
@@ -120,6 +132,7 @@ export default function ReplProvider({children}: {children: ReactNode}) {
     }
 
     const executeLatestCell = async () => {
+        addExperimentLog(`push execution button, current: ${performance.now()}`);
         setLatestCell((cell) => ({...cell, compileId:-1, state: CellStateT.Compiling, time:undefined}))
         try {
             const compileResult = useJIT ? await network.interactiveCompileWithProfiling(latestCell.code) : await network.interactiveCompile(latestCell.code)
@@ -164,6 +177,9 @@ export default function ReplProvider({children}: {children: ReactNode}) {
 
         if (latestCellRef.current.state === CellStateT.Executing) {
             updateCells();
+            addExperimentLog(`compile: ${latestCellRef.current.time?.compile}`);
+            addExperimentLog(`bluetooth: ${latestCellRef.current.time?.send}`);
+            addExperimentLog(`execution: ${exectime}`);
         } else {
             // Sometimes execution overtake screen drawing.
             setTimeout(() => {
@@ -171,6 +187,9 @@ export default function ReplProvider({children}: {children: ReactNode}) {
                     window.alert(`Something wrong happend.`)
                 } else {
                     updateCells();
+                    addExperimentLog(`compile: ${latestCellRef.current.time?.compile}`);
+                    addExperimentLog(`bluetooth: ${latestCellRef.current.time?.send}`);
+                    addExperimentLog(`execution: ${exectime}`);
                 }
             }, 500);
         }
@@ -224,6 +243,7 @@ export default function ReplProvider({children}: {children: ReactNode}) {
         const parseResult = bytecodeParser(value);
         switch (parseResult.bytecode) {
             case BYTECODE.RESULT_LOG:
+                addExperimentLog(`output: ${parseResult.log}, current: ${performance.now()}`);
                 setOutput(output => [...output, parseResult.log])
                 break;
             case BYTECODE.RESULT_ERROR:
@@ -234,7 +254,6 @@ export default function ReplProvider({children}: {children: ReactNode}) {
                 onResetComplete(parseResult.meminfo)
                 break;
             case BYTECODE.RESULT_EXECTIME: 
-                console.log("exectime", parseResult.id, parseResult.exectime);
                 onExecutionComplete(parseResult.id, parseResult.exectime)
                 break;
             case BYTECODE.RESULT_PROFILE: {
@@ -261,7 +280,8 @@ export default function ReplProvider({children}: {children: ReactNode}) {
             setLatestCellCode,
             resetStart,
             executeLatestCell,
-            install
+            install,
+            consoleExperimentLog
         }}>
         {children}
         </ReplContext.Provider>
