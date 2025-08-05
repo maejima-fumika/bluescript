@@ -1,0 +1,130 @@
+import type { integer } from "../../bs-utils";
+
+code`
+#include "driver/dac_continuous.h"
+`
+
+code`
+esp_err_t init_dac(dac_continuous_handle_t *handle, int32_t channel, int32_t freq) {
+    dac_continuous_config_t cont_cfg = {
+        .chan_mask = (dac_channel_mask_t) channel,
+        .desc_num = 4,
+        .buf_size = 2048, 
+        .freq_hz = (uint32_t) freq,
+        .clk_src = DAC_DIGI_CLK_SRC_APLL, 
+        .offset = 0,
+        .chan_mode = DAC_CHANNEL_MODE_SIMUL, 
+    };
+
+    esp_err_t err = dac_continuous_new_channels(&cont_cfg, handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = dac_continuous_enable(*handle);
+    return err;
+}
+
+esp_err_t deinit_dac(dac_continuous_handle_t *handle) {
+    esp_err_t err = dac_continuous_disable(*handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = dac_continuous_del_channels(*handle);
+    return err;
+}
+
+int32_t esp_err_to_dac_int(esp_err_t err);
+`
+
+export class DAC {
+    handle: Uint8Array;
+    channel: integer;
+    freq: integer;
+    isActive: boolean;
+
+	constructor(pin: integer, freqHz: integer) {
+		// check pin
+        let channel = -1;
+        if (pin === 25) {
+            code`_channel = (int32_t)DAC_CHANNEL_MASK_CH0`;
+        } else if (pin === 26) {
+            code`_channel = (int32_t)DAC_CHANNEL_MASK_CH1`
+        } else {
+            code`runtime_error("** DAC module error: invalid pin. The pin should be 25 or 26");`
+        }
+        this.channel = channel;
+
+        // check freq
+        let minFreq = 19600;        
+        if (freqHz < minFreq) {
+            code`runtime_error("** DAC module error: invalid freq. The freq should be larger than 19600.");`
+        }
+        this.freq = freqHz;
+
+        let handleSize = 0;
+        code`_handleSize = sizeof(dac_continuous_handle_t);`
+        this.isActive = false;
+        this.handle = new Uint8Array(handleSize, 0);
+    }
+	
+	activate():integer {
+        const handle = this.handle;
+        const channel = this.channel;
+        const freq = this.freq;
+        code`
+    value_t _handle = func_rootset.values[1];
+    dac_continuous_handle_t* handle_ptr = (dac_continuous_handle_t*)&(value_to_ptr(_handle))->body[2];
+    esp_err_t err = init_dac(handle_ptr, _channel, _freq);
+    if (err != ESP_OK) {
+        return esp_err_to_dac_int(err);
+    }
+        `
+        this.isActive = true;
+        return DAC_SUCCESS;
+    }
+	
+	inActivate():integer {
+        const handle = this.handle;
+        code`
+    value_t _handle = func_rootset.values[1];
+    dac_continuous_handle_t* handle_ptr = (dac_continuous_handle_t*)&(value_to_ptr(_handle))->body[2];
+    esp_err_t err = deinit_dac(handle_ptr);
+    return esp_err_to_dac_int(err);
+    if (err != ESP_OK) {
+        return esp_err_to_dac_int(err);
+    }
+        `
+        this.isActive = false;
+        return DAC_SUCCESS; 
+    }
+	
+	write(buf: Uint8Array):integer {
+        if (!this.isActive) {
+            print("DAC module warning: DAC is not activated.");
+            return DAC_FAIL;
+        }
+        const handle = this.handle;
+        const bufSize = buf.length;
+        code`
+    value_t _handle = func_rootset.values[2];
+    dac_continuous_handle_t* handle_ptr = (dac_continuous_handle_t*)&(value_to_ptr(_handle))->body[2];
+    uint8_t* buf_ptr = (uint8_t*)&(value_to_ptr(_buf))->body[2];
+    esp_err_t err = dac_continuous_write(*handle_ptr, buf_ptr, (size_t)_bufSize, NULL, -1);
+    return esp_err_to_dac_int(err);
+        `
+        return DAC_SUCCESS; // unreachable
+    }
+}
+
+
+export const DAC_SUCCESS = -1;
+export const DAC_FAIL = -1;
+code`
+int32_t esp_err_to_dac_int(esp_err_t err) {
+    if (err == ESP_OK) {
+        return _000006DAC_SUCCESS;
+    } else {
+        return _000006DAC_FAIL;
+    }
+}
+`

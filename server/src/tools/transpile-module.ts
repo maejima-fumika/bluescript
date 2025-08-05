@@ -35,6 +35,10 @@ function main(moduleName: string) {
     }
   }
 
+  const stdBsString = fs.readFileSync(FILE_PATH.STD_MODULES).toString()
+  const stdResult = transpile(-1, stdBsString, globalNameTable);
+  globalNameTable = stdResult.names;
+
   const src = fs.readFileSync(`${FILE_PATH.MODULES}/${moduleName}/${moduleName}.bs`).toString()
   const result = transpile(0, src, globalNameTable, importer, readModuleId(moduleName)).code
   fs.writeFileSync(`${FILE_PATH.MODULES}/${moduleName}/${moduleName}.c`, cProlog + result)

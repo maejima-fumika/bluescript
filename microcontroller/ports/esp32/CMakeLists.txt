@@ -11,6 +11,8 @@ set(EXTRA_COMPONENT_DIRS
         "../../../modules/timer" 
         "../../../modules/display"
         "../../../modules/button"
+        "../../../modules/adc"
+        "../../../modules/dac"
     )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
