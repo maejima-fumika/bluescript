@@ -49,6 +49,9 @@ bscript project run
 Please note that programs uploaded via `bscript project run` are **not persisted** after a reboot.
 
 If you restart or power off the device, the program will be lost. You will need to execute `bscript project run` again to re-upload your code.
+
+**Future Roadmap:**
+We are planning to introduce a **`bscript project deploy`** command. This command will permanently install your application, allowing it to start automatically when the device powers on.
 :::
 
 :::tip Try the REPL
@@ -58,10 +61,3 @@ Run **`bscript repl`** in your terminal. You can type commands like `console.log
 :::
 
 ---
-
-## Next Steps
-
-Now that you have the basics down, explore what else BlueScript can do:
-
-*   **[Language Reference](../../reference/language/intro)**: Learn about supported syntax, Inline C, and hardware APIs.
-*   **[CLI Reference](../../reference/cli)**: Discover advanced commands.

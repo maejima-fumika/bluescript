@@ -9,13 +9,17 @@ const sidebars: SidebarsConfig = {
         'tutorial/get-started/introduction',
         'tutorial/get-started/setup-environment',
         'tutorial/get-started/create-project-and-run',
+        "tutorial/get-started/blink-led",
       ],
     },
     {
       type: 'category',
-      label: 'Examples',
+      label: 'Guides',
       items: [
-        'tutorial/examples/blink-led'
+        'tutorial/guides/inline-c',
+        'tutorial/guides/repl',
+        'tutorial/guides/interrupts',
+        'tutorial/guides/imports-and-includes'
       ],
     },
   ],
@@ -43,7 +47,7 @@ const sidebars: SidebarsConfig = {
       label: 'Libraries',
       items: [
         'reference/libraries/builtin',
-        'reference/libraries/gpio'
+        'reference/libraries/standard'
       ]
     },
     'reference/cli',
