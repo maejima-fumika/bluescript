@@ -17,17 +17,16 @@ When the hardware triggers the interrupt, the BlueScript runtime simply flags an
 ### Example
 
 ```typescript
-import { GPIO, PinMode, PullMode, InterruptEdge, InterruptType } from "pkg-gpio-esp32";
+import { GPIO, PinMode, InterruptEdge, InterruptType } from "gpio";
 
 const button = new GPIO(0, PinMode.Input);
-button.setPullMode(PullMode.PullupOnly);
 
 // Use InterruptType.Soft
 button.onChange(InterruptEdge.Falling, InterruptType.Soft, () => {
+    let message: string = "Button was pressed!"; // Memory allocation allowed
+
     // It is safe to do heavy operations here
-    console.log("Button was pressed!");
-    
-    let message: string = "Status updated"; // Memory allocation allowed
+    console.log(message);
 });
 ```
 

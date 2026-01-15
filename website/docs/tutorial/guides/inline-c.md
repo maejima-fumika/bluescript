@@ -18,10 +18,14 @@ For any C library function you use, **you must include the corresponding header 
 // Define includes at the top level
 code`#include <math.h>`
 
-let value = 10;
-// Use a C function
-code`${value} = pow(${value}, 2);`
-console.log(value);
+function pow(x:float, y: float):float {
+    let result:float;
+    // Use a C function
+    code`${result} = (float)pow(${x}, ${y})`;
+    return result;
+}
+
+console.log(pow(2.0, 3.0));
 ```
 
 ## Variable Interpolation
@@ -42,7 +46,7 @@ function delay(ms:integer) {
 }
 
 console.log("Wait start...");
-microDelay(500); // Wait 500ms
+delay(500); // Wait 500ms
 console.log("Wait end.");
 ```
 
@@ -53,14 +57,16 @@ You can also assign values calculated in C back to BlueScript variables.
 ```typescript
 code`#include "esp_timer.h"`
 
-// 1. Prepare a variable to hold the result
-let currentTime: float = 0.0;
+function getCurrentTime() {
+    // 1. Prepare a variable to hold the result
+    let currentTime: float = 0.0;
+    // 2. Call the C API and assign the result
+    code`${currentTime} = esp_timer_get_time() / 1000.0;`;
+    // 3. Print using BlueScript
+    return currentTime;
+}
 
-// 2. Call the C API and assign the result
-code`${currentTime} = esp_timer_get_time() / 1000.0;`;
-
-// 3. Print using BlueScript
-return currentTime;
+console.log(getCurrentTime());
 ```
 
 ## Global Includes & Definitions
@@ -75,11 +81,13 @@ code`
 #define PI 3.14159265
 `
 
-export function getCircleArea(radius: number): number {
-    let area = 0;
+export function getCircleArea(radius: float): float {
+    let area = 0.0;
     code`${area} = PI * pow(${radius}, 2);`
     return area;
 }
+
+console.log(getCircleArea(4.0));
 ```
 
 ## Configuring Components

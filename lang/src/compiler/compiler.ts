@@ -353,7 +353,7 @@ class ESPIDFComponents {
     public readonly commonArchiveFilePaths: string[];
 
     private readonly COMPONENTS_PATH_PREFIX = /^.*microcontroller/;
-    private readonly COMMON_COMPONENTS = ["cxx", "newlib", "freertos", "esp_hw_support", "heap", "log", "soc", "hal", "esp_rom", "esp_common", "esp_system"];
+    private readonly COMMON_COMPONENTS = ["cxx", "newlib", "freertos", "esp_hw_support", "heap", "log", "soc", "hal", "esp_rom", "esp_common", "esp_system", "xtensa"];
     private readonly RUNTIME_DIR: string; 
     private readonly SDK_CONFIG_DIR: string;
 
