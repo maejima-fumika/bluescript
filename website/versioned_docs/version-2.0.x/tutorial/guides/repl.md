@@ -13,7 +13,7 @@ It is perfect for:
 Connect your ESP32 device and run the following command in your terminal:
 
 ```bash
-bscript repl --b esp32
+bscript repl -b esp32
 ```
 
 Once connected, you will see the prompt `>` indicating the device is ready for input.
@@ -26,9 +26,9 @@ You can type standard BlueScript expressions and statements.
 Expressions are evaluated and the result is printed automatically.
 
 ```typescript
-> 10 + 20
+> console.log(10 + 20)
 30
-> 3.14 * 2.0
+> console.log(3.14 * 2.0)
 6.28
 ```
 
@@ -37,10 +37,8 @@ You can define variables and use them in subsequent commands.
 
 ```typescript
 > let name: string = "BlueScript";
-undefined
 > console.log("Hello " + name);
 Hello BlueScript
-undefined
 ```
 
 ### Functions
@@ -48,8 +46,7 @@ You can also define simple functions interactively.
 
 ```typescript
 > function square(x: integer): integer { return x * x; }
-undefined
-> square(5)
+> console.log(square(5))
 25
 ```
 

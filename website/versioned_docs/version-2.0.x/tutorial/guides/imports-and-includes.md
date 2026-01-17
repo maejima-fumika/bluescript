@@ -68,6 +68,8 @@ export function multiply(a: integer, b: integer): integer {
     code`${result} = native_multiply(${a}, ${b});`
     return result;
 }
+
+console.log(multiply(3, 4));
 ```
 
 ### Summary table
