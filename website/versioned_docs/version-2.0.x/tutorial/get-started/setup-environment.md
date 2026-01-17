@@ -1,5 +1,9 @@
 # Set up your environment
 
+:::danger macOS Only
+Currently, BlueScript strictly requires **macOS**. Windows and Linux support is under development.
+:::
+
 In this guide, we will install the BlueScript CLI and flash the runtime environment to your microcontroller.
 
 Currently, only **ESP32 development boards** are supported.
@@ -12,9 +16,8 @@ Before we begin, ensure you have the following:
   - **Host PC:** A laptop running **macOS** (Windows and Linux are currently **not** supported).
   - **Micocontroller:** An ESP32 development board (e.g., ESP32-DevKitC)
   - **USB cable** to connect your host PC and the microcontroller 
-- **Software**
+- **Software:**
   - [Node.js](https://nodejs.org/) (v20 or later) installed on your host PC.
-
 ---
 
 ## Step 1: Install the CLI
@@ -58,12 +61,12 @@ Connect your ESP32 to your computer via USB and flash the runtime:
 bscript board flash-runtime esp32
 ```
 
+The CLI will display a list of detected serial ports. Use the arrow keys to select the one corresponding to your ESP32 (e.g., /dev/tty.usbserial-xxxx).
+
+:::info Device not found?
+If your device does not appear in the list, you may need to install USB-to-UART drivers (e.g., [CP210x](https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers) or [FTDI](https://ftdichip.com/drivers/vcp-drivers/)).
+
+See also [Establish Serial Connection with ESP32](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/establish-serial-connection.html).
+:::
+
 If the flash is successful, your device is now ready to receive BlueScript code wirelessly!
-
----
-
-## Next Steps
-
-Now that your device is set up, let's create your first project.
-
-👉 **[Go to: Create project and Run](./create-project-and-run)**
