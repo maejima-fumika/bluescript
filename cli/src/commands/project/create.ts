@@ -10,7 +10,7 @@ import * as fs from '../../core/fs';
 import { CommandHandler } from "../command";
 
 
-const MAIN_FILE_CONTENTS = `print('Hello world!')\n`;
+const MAIN_FILE_CONTENTS = `console.log('Hello world!')\n`;
 const GIT_IGNORE_CONTENTS = `**/dist/\n`;
 
 class CreateHandler extends CommandHandler {

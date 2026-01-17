@@ -45,17 +45,17 @@ Open `index.bs` and replace its content with the code below.
 This program will blink the LED 10 times with a 1-second interval.
 
 :::warning Select your Pin
-The code below uses **GPIO 23** (External LED).
-If you are using the **Onboard LED**, change `23` to `2` in the `new GPIO(...)` line.
+The code below uses **GPIO 2** (Onboard LED).
+If you are using the **External LED**, change `2` to `23` in the `new GPIO(...)` line.
 :::
 
 ```typescript title="index.bs"
 // Import GPIO class and Enums from the installed package
 import { GPIO, PinMode, PinLevel } from "gpio";
 
-// Initialize GPIO 23 as Input/Output mode
-// CHANGE THIS TO '2' IF USING ONBOARD LED
-const led = new GPIO(23, PinMode.InputOutput);
+// Initialize GPIO 2 as Input/Output mode
+// CHANGE THIS TO '23' IF USING EXTERNAL LED
+const led = new GPIO(2, PinMode.InputOutput);
 
 console.log("Starting Blink Loop...");
 
@@ -70,6 +70,7 @@ for (let i = 0; i < 10; i++) {
     time.delay(1000);
 }
 
+led.close();
 console.log("Finished!");
 ```
 

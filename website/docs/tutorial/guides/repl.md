@@ -56,12 +56,10 @@ undefined
 ## Current Limitations
 
 :::warning No Hardware Access (Yet)
-Currently, the REPL **does not support loading external hardware libraries** such as `pkg-gpio-esp32`.
-
+Currently, the REPL **does not support loading external hardware libraries** such as `gpio`.
 You cannot import modules in the REPL at this moment.
-:::
 
-:::note Future Roadmap
+**Future Roadmap:**
 We are actively working on enabling dynamic library loading for the REPL.
 In a future update, you will be able to type `led.write(1)` and toggle pins directly from the terminal!
 :::

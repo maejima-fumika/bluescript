@@ -77,4 +77,3 @@ export function multiply(a: integer, b: integer): integer {
 | **Local BS Module** | `import { ... }` | Relative | `"./utils"` |
 | **Package BS Module** | `import { ... }` | Package Name | `"gpio"` |
 | **Local C File** | `code`\`#include ...\` | Relative | `"./driver.c"` |
-| **System C Header** | `code`\`#include ...\` | System | `<math.h>` |

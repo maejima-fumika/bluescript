@@ -23,8 +23,9 @@ const button = new GPIO(0, PinMode.Input);
 
 // Use InterruptType.Soft
 button.onChange(InterruptEdge.Falling, InterruptType.Soft, () => {
-    let message: string = "Button was pressed!"; // Memory allocation allowed
-
+    // Memory allocation allowed
+    let message: string = "Button was pressed!"; 
+    
     // It is safe to do heavy operations here
     console.log(message);
 });
@@ -42,14 +43,14 @@ button.onChange(InterruptEdge.Falling, InterruptType.Soft, () => {
 Inside a Hard Interrupt callback:
 1.  ❌ **No Memory Allocation:** Do not create objects (`new`), arrays, or strings.
 2.  ❌ **No Blocking:** Do not use `console.log` (it blocks for Bluetooth) or loops.
-3.  ✅ **Integer Math Only:** Only basic math and accessing global `integer` variables are safe.
+3.  ✅ **Integer Math Only:** Only basic math and accessing global `integer`, `float`, and `boolean` variables are safe.
 
 ### Example
 
 To safely use Hard Interrupts, keep the logic minimal.
 
 ```typescript
-import { GPIO, PinMode, PullMode, InterruptEdge, InterruptType } from "pkg-gpio-esp32";
+import { GPIO, PinMode, PullMode, InterruptEdge, InterruptType } from "gpio";
 
 const sensor = new GPIO(23, PinMode.Input);
 let pulseCount: integer = 0; // Global counter
