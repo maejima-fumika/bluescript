@@ -1,3 +1,0 @@
-# Blink LED
-
-Coming soon...
