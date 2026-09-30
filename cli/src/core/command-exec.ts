@@ -1,5 +1,6 @@
 import { ChildProcess, spawn, SpawnOptions } from "child_process";
 import { logger } from "./logger";
+import { terminal } from "./terminal";
 import { exists } from "./fs";
 
 export function cwd() {
@@ -131,7 +132,7 @@ export async function execWithLog(
     logger.log(`Executing ${formattedCommand}`);
 
     const { stdout } = await runProcess(command, args, options, {
-        onStdoutData: (chunk) => process.stdout.write(chunk),
+        onStdoutData: (chunk) => terminal.write(chunk),
         onStderrData: (chunk) => process.stderr.write(chunk),
     }, 'stderr');
     return stdout;

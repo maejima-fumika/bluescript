@@ -1,11 +1,9 @@
 import { Command, Option } from "commander";
-import chalk from "chalk";
-import * as readline from 'readline';
 import http from 'http';
 import sirv from 'sirv';
 import path from 'path';
-import { logger, ProgramOutput, createBoxedOutput, createConsoleOutput, createWebSocketOutput, 
-    runStep, LoadStepLogger } from "../../core/logger";
+import { logger, runStep } from "../../core/logger";
+import { BoxedOutput, LineOutput, WebSocketOutput } from "../../core/program-output";
 import { DEFAULT_DEVICE_NAME, ProjectConfigHandler } from "../../config/project-config";
 import { cwd, simpleExec } from "../../core/command-exec";
 import { CommandHandlerWithUpdateCheck } from "../command";
@@ -13,23 +11,20 @@ import { ProjectSession } from "../../platforms/project-session";
 import { CompileError, CompileOutput } from "@bscript/lang";
 import { WebSocketConnection } from "../../services/websocket";
 import { AsyncLock } from "../../core/async";
+import { terminal } from "../../core/terminal";
 
 class RunHandler extends CommandHandlerWithUpdateCheck {
     protected session: ProjectSession;
-    protected programOutput: ProgramOutput;
-
-    private globalKeypressHandler?: (str: string, key: any) => void;
-    private ctrlDKeypressHandler?: (str: string, key: any) => void;
+    private readonly boxedOutput = new BoxedOutput();
 
     constructor(protected projectConfigHandler: ProjectConfigHandler, deviceName?: string) {
         super();
 
-        this.programOutput = createBoxedOutput();
         this.session = new ProjectSession(
-            this.projectConfigHandler, this.globalConfigHandler, this.programOutput, deviceName,
+            this.projectConfigHandler, this.globalConfigHandler, this.boxedOutput, deviceName,
         );
         this.session.on('disconnected', () => {
-            this.programOutput.onRunEnd?.();
+            this.boxedOutput.close();
             logger.error("Disconnected.");
             process.exit(1);
         });
@@ -44,85 +39,40 @@ class RunHandler extends CommandHandlerWithUpdateCheck {
     }
 
     async loadStep(compileOutput: CompileOutput) {
-        const loadLogger = new LoadStepLogger();
-        loadLogger.start();
-        try {
-            await this.session.load(compileOutput, (percent) => loadLogger.update(percent));
-            loadLogger.endWithSuccess();
-        } catch (error) {
-            loadLogger.endWithFailure();
-            throw error;
-        }
+        await runStep('Loading...', (step) =>
+            this.session.load(compileOutput, (percent) => step.progress(`${percent}%`)));
     }
 
     async close() {
         await runStep('Disconnecting...', () => this.session.close());
     }
 
-    protected setupStdin() {
-        if (!process.stdin.isTTY) {
-            return;
-        }
-        readline.emitKeypressEvents(process.stdin);
-        process.stdin.setRawMode(true);
-        this.globalKeypressHandler = (str, key) => {
-            if (key && key.ctrl && key.name === 'c') {
-                process.exit(0);
-            }
-            if (str) process.stdout.write(str);
-        };
-        process.stdin.on('keypress', this.globalKeypressHandler);
-    }
-
-    private resetStdin() {
-        if (!process.stdin.isTTY) {
-            return;
-        }
-        if (this.globalKeypressHandler) {
-            process.stdin.off('keypress', this.globalKeypressHandler);
-            this.globalKeypressHandler = undefined;
-        }
-        if (this.ctrlDKeypressHandler) {
-            process.stdin.off('keypress', this.ctrlDKeypressHandler);
-            this.ctrlDKeypressHandler = undefined;
-        }
-        process.stdin.setRawMode(false);
-    }
-
-    private async executeProgram(output: CompileOutput) {
+    /** @returns true when the program is interrupted by Ctrl-D. */
+    private async executeProgram(output: CompileOutput): Promise<boolean> {
         logger.info("Start executing program. Type 'Ctrl-D' to exit.");
-        this.programOutput.onRunStart?.();
+        this.boxedOutput.open();
+        let requestStop!: () => void;
+        const stopRequested = new Promise<true>((resolve) => {
+            requestStop = () => resolve(true);
+        });
+        const disposeControlKeys = terminal.listenKeys({
+            onCtrlC: () => process.exit(0),
+            onCtrlD: () => requestStop(),
+        });
         try {
-            if (!process.stdin.isTTY) {
-                await this.session.execute(output);
-                return false;
-            }
-
-            this.setupStdin();
-            const interrupted = await new Promise<boolean>((resolve, reject) => {
-                this.ctrlDKeypressHandler = (str, key) => {
-                    if (key && key.ctrl && key.name === 'd') {
-                        resolve(true);
-                        if (str) process.stdout.write(str);
-                    }
-                };
-                process.stdin.on('keypress', this.ctrlDKeypressHandler);
-
-                this.session.execute(output)
-                    .then(() => resolve(false))
-                    .catch(reject);
-            });
-            return interrupted;
+            return await Promise.race([
+                this.session.execute(output).then(() => false),
+                stopRequested,
+            ]);
         } finally {
-            this.programOutput.onRunEnd?.();
-            this.resetStdin();
+            disposeControlKeys();
+            this.boxedOutput.close();
         }
     }
 }
 
 class RunWithReplHandler extends RunHandler {
-    private rl?: readline.Interface;
-    private readonly taskLock = new AsyncLock();
+    private readonly replOutput = new LineOutput();
 
     async run() {
         const interrupted = await super.run();
@@ -130,50 +80,25 @@ class RunWithReplHandler extends RunHandler {
             return interrupted;
         }
 
-        this.session.setOutput(createConsoleOutput());
-        await this.runRepl();
+        this.session.setOutput(this.replOutput);
+        logger.info("Start REPL. Type 'Ctrl-D' to exit.");
+        await terminal.readLines((line) => this.processReplLine(line));
         return false;
     }
 
-    async close() {
-        this.rl?.close();
-        await super.close();
-    }
-
-    private runRepl() {
-        logger.info("Start REPL. Type 'Ctrl-D' to exit.");
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-            prompt: chalk.blue.bold('> '),
-        });
-        this.rl = rl;
-        rl.prompt();
-        return new Promise<void>((resolve, reject) => {
-            rl.on('line', (line) => {
-                rl.pause();
-                void this.taskLock.runExclusive(async () => {
-                    try {
-                        const output = await this.session.compileFragment(line);
-                        await this.session.load(output);
-                        await this.session.execute(output);
-                    } catch (error) {
-                        if (error instanceof CompileError) {
-                            logger.error("** compile error: " + error.toString());
-                        } else {
-                            reject(error);
-                            return;
-                        }
-                    } finally {
-                        rl.resume();
-                        rl.prompt();
-                    }
-                });
-            });
-            rl.on('close', () => {
-                resolve();
-            });
-        });
+    private async processReplLine(line: string) {
+        try {
+            const output = await this.session.compileFragment(line);
+            await this.session.load(output);
+            await this.session.execute(output);
+        } catch (error) {
+            if (!(error instanceof CompileError)) {
+                throw error;
+            }
+            logger.error("** compile error: " + error.toString());
+        } finally {
+            this.replOutput.flush();
+        }
     }
 }
 
@@ -191,12 +116,13 @@ class RunWithNotebookHandler extends RunHandler {
         await this.startUiServer();
         logger.info("Type 'Ctrl-D' to exit.");
 
-        this.setupStdin();
         return new Promise<boolean>((resolve) => {
-            process.stdin.on('keypress', (str, key) => {
-                if (key && key.ctrl && key.name === 'd') {
+            const disposeControlKeys = terminal.listenKeys({
+                onCtrlC: () => process.exit(0),
+                onCtrlD: () => {
+                    disposeControlKeys();
                     resolve(true);
-                }
+                },
             });
         });
     }
@@ -244,7 +170,7 @@ class RunWithNotebookHandler extends RunHandler {
         this.ws = new WebSocketConnection(port);
         const service = this.ws.getService('repl');
         this.ws.open();
-        this.session.setOutput(createWebSocketOutput(service));
+        this.session.setOutput(new WebSocketOutput(service));
         service.on('execute', (code: string) => {
             void this.executeLock.runExclusive(async () => {
                 try {

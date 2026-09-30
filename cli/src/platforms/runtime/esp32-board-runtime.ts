@@ -1,6 +1,6 @@
 import { BleConnection, DeviceService } from "../../services/ble/index";
 import { MemoryImage } from "@bscript/lang";
-import { ProgramOutput } from "../../core/logger/program-output";
+import { ProgramOutput } from "../../core/program-output";
 import { BoardRuntime } from "./board-runtime";
 import { CompileContext } from "../compiler/compiler-adapter";
 

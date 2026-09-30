@@ -3,7 +3,7 @@ import { BoardName } from "../config/board-utils";
 import { GlobalConfigHandler } from "../config/global-config";
 import { ProjectConfigHandler } from "../config/project-config";
 import { withTimeout } from "../core/async";
-import { ProgramOutput } from "../core/logger";
+import { ProgramOutput } from "../core/program-output";
 import { EventEmitter, EventMap } from "../services/common";
 import { CompileContext, CompilerAdapter, getCompilerAdapter } from "./compiler";
 import { BoardRuntime, getBoardRuntime } from "./runtime";

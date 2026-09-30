@@ -1,7 +1,7 @@
 import { GlobalConfigHandler } from "../../config/global-config";
 import { DEFAULT_DEVICE_NAME } from "../../config/project-config";
 import { BoardName } from "../../config/board-utils";
-import { ProgramOutput } from "../../core/logger/program-output";
+import { ProgramOutput } from "../../core/program-output";
 import { BoardRuntime } from "../runtime/board-runtime";
 import { Esp32BoardRuntime } from "../runtime/esp32-board-runtime";
 import { HostBoardRuntime } from "../runtime/host-board-runtime";

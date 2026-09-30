@@ -1,10 +1,8 @@
 import { Command } from "commander";
 import { logger, runStep } from "../core/logger";
-import { createConsoleOutput } from "../core/logger/program-output";
+import { LineOutput } from "../core/program-output";
 import { DEFAULT_DEVICE_NAME, PROJECT_DEFAULT_PATHS, ProjectConfigHandler } from "../config/project-config";
 import * as path from 'path';
-import * as readline from 'readline';
-import chalk from "chalk";
 import * as fs from '../core/fs';
 import { CommandHandlerWithUpdateCheck } from "./command";
 import { GLOBAL_SETTINGS } from "../config/constants";
@@ -12,17 +10,7 @@ import { BoardRuntime, getBoardRuntime } from "../platforms/runtime";
 import { CompileContext, CompilerAdapter, getCompilerAdapter } from "../platforms/compiler";
 import { BoardName } from "../config/board-utils";
 import { CompileError, CompileOutput } from "@bscript/lang";
-import { AsyncLock } from "../core/async";
-
-type ReplReadlineFactory = () => readline.Interface;
-
-function defaultReplReadlineFactory(): readline.Interface {
-    return readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        prompt: chalk.blue.bold('> '),
-    });
-}
+import { ReadlineFactory, terminal } from "../core/terminal";
 
 class ReplHandler extends CommandHandlerWithUpdateCheck {
     static readonly TEMP_PROJECT_NAME = 'temp';
@@ -33,15 +21,14 @@ class ReplHandler extends CommandHandlerWithUpdateCheck {
     private projectConfigHandler: ProjectConfigHandler;
     private compiler: CompilerAdapter;
     private runtime: BoardRuntime;
-    private rl: readline.Interface;
+    private readonly output = new LineOutput();
     private compileContext?: CompileContext;
     private isFirstCompile: boolean;
-    private readonly taskLock = new AsyncLock();
 
     constructor(
         private boardName: string,
         deviceName?: string,
-        private createReadline: ReplReadlineFactory = defaultReplReadlineFactory,
+        private createReadline?: ReadlineFactory,
     ) {
         super();
 
@@ -52,15 +39,15 @@ class ReplHandler extends CommandHandlerWithUpdateCheck {
         this.compiler = getCompilerAdapter(board, this.globalConfigHandler, this.projectConfigHandler);
         this.runtime = getBoardRuntime(
             board, this.globalConfigHandler,
-            createConsoleOutput(), deviceName ?? DEFAULT_DEVICE_NAME,
+            this.output, deviceName ?? DEFAULT_DEVICE_NAME,
             () => {
+                this.output.flush();
                 logger.error('Disconnected.');
                 this.deleteTempProject();
                 process.exit(1);
             },
         );
 
-        this.rl = this.createReadline();
         this.isFirstCompile = true;
     }
 
@@ -70,39 +57,26 @@ class ReplHandler extends CommandHandlerWithUpdateCheck {
 
         this.createTempProject();
         await this.runRepl();
-        this.rl.close();
 
         await runStep('Disconnecting...', () => this.runtime.disconnect());
         this.deleteTempProject();
         process.exit(0);
     }
 
-    private runRepl() {
+    private async runRepl() {
         logger.info("Start REPL. Type 'Ctrl-D' to exit.");
-        this.rl.prompt();
-        return new Promise<void>((resolve, reject) => {
-            this.rl.on('line', (line) => {
-                this.rl.pause();
-                void this.taskLock.runExclusive(async () => {
-                    try {
-                        await this.processReplLine(line);
-                    } catch (error) {
-                        if (error instanceof CompileError) {
-                            logger.error("** compile error: " + error.toString());
-                        } else {
-                            reject(error);
-                            return;
-                        }
-                    } finally {
-                        this.rl.resume();
-                        this.rl.prompt();
-                    }
-                });
-            });
-            this.rl.on('close', () => {
-                resolve();
-            });
-        });
+        await terminal.readLines(async (line) => {
+            try {
+                await this.processReplLine(line);
+            } catch (error) {
+                if (!(error instanceof CompileError)) {
+                    throw error;
+                }
+                logger.error("** compile error: " + error.toString());
+            } finally {
+                this.output.flush();
+            }
+        }, this.createReadline);
     }
 
     private async processReplLine(line: string) {
@@ -146,7 +120,7 @@ class ReplHandler extends CommandHandlerWithUpdateCheck {
 
 export async function handleReplCommand(
     options: { board: string, deviceName?: string },
-    deps?: { createReadline?: ReplReadlineFactory },
+    deps?: { createReadline?: ReadlineFactory },
 ) {
     try {
         const handler = new ReplHandler(options.board, options.deviceName, deps?.createReadline);

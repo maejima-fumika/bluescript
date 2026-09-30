@@ -1,6 +1,7 @@
 import readline from 'readline';
 
-export class LogUpdater {
+/** A line at the bottom of the terminal that can be rewritten in place, such as a progress message. */
+export class StatusLine {
     private stream: NodeJS.WriteStream;
     private lastOutput = '';
     private isUpdating = false;
@@ -57,5 +58,3 @@ export class LogUpdater {
         return lineCount;
     }
 }
-
-export const logUpdater = new LogUpdater(process.stdout);

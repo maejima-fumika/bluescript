@@ -1,5 +1,4 @@
-import { runStep, skip } from "../../../core/logger";
-import { StepSkip } from "../../../core/logger/step-runner";
+import { runStep, skip, StepSkip } from "../../../core/logger";
 import { CommandHandlerWithUpdateCheck } from "../../command";
 import { BoardName } from "../../../config/board-utils";
 import { CommonBoardEnv } from "../../../platforms/board-env/common-env";

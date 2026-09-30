@@ -1,11 +1,11 @@
 import { Command } from "commander";
-import chalk from "chalk";
 import * as os from 'os';
 import { CompileOutput } from "@bscript/lang";
-import { logger, LoadStepLogger, PrefixedOutput, createPrefixedOutput, createTags } from "../../core/logger";
+import { logger, runStep, formatStepResult } from "../../core/logger";
+import { LineOutput, createTags } from "../../core/program-output";
 import { cwd } from "../../core/command-exec";
 import { settleAll } from "../../core/async";
-import { listenControlKeys } from "../../core/terminal/control-keys";
+import { terminal } from "../../core/terminal";
 import { DEFAULT_DEVICE_NAME } from "../../config/project-config";
 import { WorkspaceConfigHandler, WorkspaceProject } from "../../config/workspace-config";
 import { ProjectSession, SessionDisconnectedError } from "../../platforms/project-session";
@@ -15,7 +15,7 @@ type Member = {
     name: string;
     tag: string;
     session: ProjectSession;
-    output: PrefixedOutput;
+    output: LineOutput;
     compileOutput?: CompileOutput;
 };
 
@@ -66,7 +66,7 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
 
         this.members = projects.map((p) => {
             const tag = tags.get(p.name)!;
-            const output = createPrefixedOutput(tag);
+            const output = new LineOutput(tag);
             const session = new ProjectSession(p.project, this.globalConfigHandler, output, p.deviceName);
             session.on('disconnected', () => {
                 this.failed.add(p.name);
@@ -93,9 +93,9 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
         const results = await settleAll(this.members, async (m) => {
             try {
                 await action(m);
-                logger.info(m.tag, label, chalk.green('OK'));
+                logger.info(m.tag, formatStepResult(label, 'ok'));
             } catch (error) {
-                logger.info(m.tag, label, chalk.red('Failed'));
+                logger.info(m.tag, formatStepResult(label, 'failed'));
                 logger.showError(error, 4);
                 throw error;
             }
@@ -110,13 +110,10 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
     /** One at a time, so the boards do not compete for the Bluetooth bandwidth. */
     private async loadAll() {
         for (const m of this.members) {
-            const loadLogger = new LoadStepLogger(m.tag);
-            loadLogger.start();
             try {
-                await m.session.load(m.compileOutput!, (percent) => loadLogger.update(percent));
-                loadLogger.endWithSuccess();
+                await runStep(`${m.tag} Loading...`, (step) =>
+                    m.session.load(m.compileOutput!, (percent) => step.progress(`${percent}%`)));
             } catch (error) {
-                loadLogger.endWithFailure();
                 throw new Error(`Failed to load ${m.name}.`, { cause: error });
             }
         }
@@ -129,7 +126,7 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
         const stopRequested = new Promise<void>((resolve) => {
             requestStop = resolve;
         });
-        const disposeControlKeys = listenControlKeys({
+        const disposeControlKeys = terminal.listenKeys({
             onCtrlC: () => process.exit(0),
             onCtrlD: () => requestStop(),
         });
