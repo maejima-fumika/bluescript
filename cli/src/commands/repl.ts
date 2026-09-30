@@ -12,7 +12,7 @@ import { BoardRuntime, getBoardRuntime } from "../platforms/runtime";
 import { CompileContext, CompilerAdapter, getCompilerAdapter } from "../platforms/compiler";
 import { BoardName } from "../config/board-utils";
 import { CompileError, CompileOutput } from "@bscript/lang";
-import { SerialTaskQueue } from "../core/serial-task-queue";
+import { AsyncLock } from "../core/async";
 
 type ReplReadlineFactory = () => readline.Interface;
 
@@ -36,7 +36,7 @@ class ReplHandler extends CommandHandlerWithUpdateCheck {
     private rl: readline.Interface;
     private compileContext?: CompileContext;
     private isFirstCompile: boolean;
-    private readonly taskQueue = new SerialTaskQueue();
+    private readonly taskLock = new AsyncLock();
 
     constructor(
         private boardName: string,
@@ -83,7 +83,7 @@ class ReplHandler extends CommandHandlerWithUpdateCheck {
         return new Promise<void>((resolve, reject) => {
             this.rl.on('line', (line) => {
                 this.rl.pause();
-                this.taskQueue.enqueue(async () => {
+                void this.taskLock.runExclusive(async () => {
                     try {
                         await this.processReplLine(line);
                     } catch (error) {

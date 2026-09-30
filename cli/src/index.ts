@@ -16,6 +16,10 @@ import { registerInstallCommand } from './commands/project/install';
 import { registerUninstallCommand } from './commands/project/uninstall';
 import { registerUpdateCommand } from './commands/board/update';
 import { registerCheckCommand } from './commands/project/check';
+import { registerCreateWorkspaceCommand } from './commands/workspace/create';
+import { registerAddProjectCommand } from './commands/workspace/add';
+import { registerRemoveProjectCommand } from './commands/workspace/remove';
+import { registerWorkspaceRunCommand } from './commands/workspace/run';
 
 
 function registerBoardCommands(program: Command) {
@@ -43,6 +47,17 @@ function registerProjectCommands(program: Command) {
     registerCheckCommand(projectCommand);
 }
 
+function registerWorkspaceCommands(program: Command) {
+    const workspaceCommand = program
+        .command('workspace')
+        .description('manage workspaces and run multiple projects at the same time');
+
+    registerCreateWorkspaceCommand(workspaceCommand);
+    registerAddProjectCommand(workspaceCommand);
+    registerRemoveProjectCommand(workspaceCommand);
+    registerWorkspaceRunCommand(workspaceCommand);
+}
+
 function main() {
     const command = new Command();
 
@@ -53,6 +68,7 @@ function main() {
 
     registerBoardCommands(command);
     registerProjectCommands(command);
+    registerWorkspaceCommands(command);
     registerReplCommand(command);
 
     command.parse(process.argv);

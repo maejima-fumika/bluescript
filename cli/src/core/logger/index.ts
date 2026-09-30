@@ -7,3 +7,4 @@ export {
     createConsoleOutput,
     createWebSocketOutput,
 } from './program-output';
+export { PrefixedOutput, createPrefixedOutput, createTags } from './prefixed-output';

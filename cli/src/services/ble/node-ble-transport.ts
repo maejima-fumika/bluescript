@@ -6,6 +6,7 @@ import {
     bleUuidsEqual,
     isBluetoothAddress,
 } from "./transport";
+import { withTimeout } from "../../core/async";
 
 type Adapter = nodeBle.Adapter;
 type Device = nodeBle.Device;
@@ -326,26 +327,10 @@ function isPermissionDenied(error: unknown): boolean {
 /** Await a cleanup step under a deadline, tolerating both failures and hangs. */
 async function cleanupStep(promise: Promise<unknown>): Promise<void> {
     try {
-        await withTimeout(promise, TEARDOWN_TIMEOUT_MS);
+        await withTimeout(promise, TEARDOWN_TIMEOUT_MS, "BLE operation timed out.");
     } catch {
         // Best-effort: the link may already be gone.
     }
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        const handle = setTimeout(() => reject(new Error("BLE operation timed out.")), ms);
-        promise.then(
-            (value) => {
-                clearTimeout(handle);
-                resolve(value);
-            },
-            (error) => {
-                clearTimeout(handle);
-                reject(error);
-            },
-        );
-    });
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

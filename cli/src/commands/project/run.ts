@@ -9,15 +9,13 @@ import { logger, ProgramOutput, createBoxedOutput, createConsoleOutput, createWe
 import { DEFAULT_DEVICE_NAME, ProjectConfigHandler } from "../../config/project-config";
 import { cwd, simpleExec } from "../../core/command-exec";
 import { CommandHandlerWithUpdateCheck } from "../command";
-import { BoardRuntime, getBoardRuntime } from "../../platforms/runtime";
-import { CompilerAdapter, getCompilerAdapter } from "../../platforms/compiler";
+import { ProjectSession } from "../../platforms/project-session";
 import { CompileError, CompileOutput } from "@bscript/lang";
 import { WebSocketConnection } from "../../services/websocket";
-import { SerialTaskQueue } from "../../core/serial-task-queue";
+import { AsyncLock } from "../../core/async";
 
 class RunHandler extends CommandHandlerWithUpdateCheck {
-    protected compiler: CompilerAdapter;
-    protected runtime: BoardRuntime;
+    protected session: ProjectSession;
     protected programOutput: ProgramOutput;
 
     private globalKeypressHandler?: (str: string, key: any) => void;
@@ -26,25 +24,21 @@ class RunHandler extends CommandHandlerWithUpdateCheck {
     constructor(protected projectConfigHandler: ProjectConfigHandler, deviceName?: string) {
         super();
 
-        const boardName = this.projectConfigHandler.getBoardName();
         this.programOutput = createBoxedOutput();
-
-        this.compiler = getCompilerAdapter(boardName, this.globalConfigHandler, this.projectConfigHandler);
-        this.runtime = getBoardRuntime(
-            boardName, this.globalConfigHandler,
-            this.programOutput, deviceName ?? DEFAULT_DEVICE_NAME,
-            () => {
-                this.programOutput.onRunEnd?.();
-                logger.error("Disconnected.");
-                process.exit(1);
-            },
+        this.session = new ProjectSession(
+            this.projectConfigHandler, this.globalConfigHandler, this.programOutput, deviceName,
         );
+        this.session.on('disconnected', () => {
+            this.programOutput.onRunEnd?.();
+            logger.error("Disconnected.");
+            process.exit(1);
+        });
     }
 
     async run(): Promise<boolean> {
-        await runStep('Connecting...', () => this.runtime.connect());
-        const compileContext = await runStep('Initializing...', () => this.runtime.prepare());
-        const compileOutput = await runStep('Compiling...', () => this.compiler.buildProject(compileContext));
+        await runStep('Connecting...', () => this.session.connect());
+        await runStep('Initializing...', () => this.session.prepare());
+        const compileOutput = await runStep('Compiling...', () => this.session.build());
         await this.loadStep(compileOutput!);
         return this.executeProgram(compileOutput!);
     }
@@ -53,15 +47,16 @@ class RunHandler extends CommandHandlerWithUpdateCheck {
         const loadLogger = new LoadStepLogger();
         loadLogger.start();
         try {
-            await this.runtime.load(compileOutput, (percent) => loadLogger.update(percent));
+            await this.session.load(compileOutput, (percent) => loadLogger.update(percent));
             loadLogger.endWithSuccess();
         } catch (error) {
             loadLogger.endWithFailure();
+            throw error;
         }
     }
 
     async close() {
-        await runStep('Disconnecting...', async () => this.runtime.disconnect());
+        await runStep('Disconnecting...', () => this.session.close());
     }
 
     protected setupStdin() {
@@ -99,7 +94,7 @@ class RunHandler extends CommandHandlerWithUpdateCheck {
         this.programOutput.onRunStart?.();
         try {
             if (!process.stdin.isTTY) {
-                await this.runtime.execute(output);
+                await this.session.execute(output);
                 return false;
             }
 
@@ -113,7 +108,7 @@ class RunHandler extends CommandHandlerWithUpdateCheck {
                 };
                 process.stdin.on('keypress', this.ctrlDKeypressHandler);
 
-                this.runtime.execute(output)
+                this.session.execute(output)
                     .then(() => resolve(false))
                     .catch(reject);
             });
@@ -127,7 +122,7 @@ class RunHandler extends CommandHandlerWithUpdateCheck {
 
 class RunWithReplHandler extends RunHandler {
     private rl?: readline.Interface;
-    private readonly taskQueue = new SerialTaskQueue();
+    private readonly taskLock = new AsyncLock();
 
     async run() {
         const interrupted = await super.run();
@@ -135,7 +130,7 @@ class RunWithReplHandler extends RunHandler {
             return interrupted;
         }
 
-        this.runtime.setOutput(createConsoleOutput());
+        this.session.setOutput(createConsoleOutput());
         await this.runRepl();
         return false;
     }
@@ -157,11 +152,11 @@ class RunWithReplHandler extends RunHandler {
         return new Promise<void>((resolve, reject) => {
             rl.on('line', (line) => {
                 rl.pause();
-                this.taskQueue.enqueue(async () => {
+                void this.taskLock.runExclusive(async () => {
                     try {
-                        const output = await this.compiler.compileFragment(line);
-                        await this.runtime.load(output);
-                        await this.runtime.execute(output);
+                        const output = await this.session.compileFragment(line);
+                        await this.session.load(output);
+                        await this.session.execute(output);
                     } catch (error) {
                         if (error instanceof CompileError) {
                             logger.error("** compile error: " + error.toString());
@@ -185,7 +180,7 @@ class RunWithReplHandler extends RunHandler {
 class RunWithNotebookHandler extends RunHandler {
     private ws: WebSocketConnection | null = null;
     private server: http.Server | null = null;
-    private readonly executeQueue = new SerialTaskQueue();
+    private readonly executeLock = new AsyncLock();
 
     async run() {
         const interrupted = await super.run();
@@ -249,9 +244,9 @@ class RunWithNotebookHandler extends RunHandler {
         this.ws = new WebSocketConnection(port);
         const service = this.ws.getService('repl');
         this.ws.open();
-        this.runtime.setOutput(createWebSocketOutput(service));
+        this.session.setOutput(createWebSocketOutput(service));
         service.on('execute', (code: string) => {
-            this.executeQueue.enqueue(async () => {
+            void this.executeLock.runExclusive(async () => {
                 try {
                     let {output, time} = await this.compile(code);
                     service.finishCompilation(time);
@@ -274,18 +269,18 @@ class RunWithNotebookHandler extends RunHandler {
 
     private async compile(code: string) {
         const start = performance.now();
-        const output = await this.compiler.compileFragment(code);
+        const output = await this.session.compileFragment(code);
         return {output, time: performance.now() - start};
     }
 
     private async load(output: CompileOutput) {
         const start = performance.now();
-        await this.runtime.load(output);
+        await this.session.load(output);
         return performance.now() - start;
     }
 
     private async execute(output: CompileOutput) {
-        return await this.runtime.execute(output);
+        return await this.session.execute(output);
     }
 }
 

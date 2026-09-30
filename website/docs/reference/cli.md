@@ -140,6 +140,115 @@ See the [REPL & Notebook tutorial](../tutorial/guides/repl.md) for usage details
 ---
 
 
+## Workspace Management
+
+A workspace groups several projects so that they can run at the same time, for example a sensor on one ESP32, an actuator on another ESP32, and a simulator on the host. `esp32` and `host` projects can be mixed in one workspace.
+
+A workspace is a directory with a `bsworkspace.json` file:
+
+```json
+{
+  "name": "robot-swarm",
+  "projects": [
+    { "path": "./sensor", "deviceName": "BS-SENSOR" },
+    { "path": "./actuator", "deviceName": "BS-ACTUATOR" },
+    { "path": "./sim" }
+  ]
+}
+```
+
+| Field | Description |
+| :--- | :--- |
+| `name` | Name of the workspace. |
+| `projects[].path` | Path to a project directory (containing `bsconfig.json`), relative to the workspace directory. |
+| `projects[].deviceName` | Bluetooth device name of the board that runs the project. **ESP32 only.** Defaults to `"BLUESCRIPT"`. Each ESP32 project must use a different device name. |
+
+Projects are identified by `projectName` in their `bsconfig.json`, so every project in a workspace must have a unique `projectName`.
+
+### `bscript workspace create`
+
+Creates a new directory containing an empty `bsworkspace.json`.
+
+```bash
+bscript workspace create <workspace-name>
+```
+
+**Arguments:**
+*   `<workspace-name>`: The name of the directory to create.
+
+---
+
+### `bscript workspace add`
+
+Adds an existing project to the workspace. Run it anywhere inside the workspace directory.
+
+```bash
+bscript workspace add <project-path> [options]
+```
+
+**Arguments:**
+*   `<project-path>`: Path to the project directory.
+
+**Options:**
+
+| Option | Alias | Description |
+| :--- | :--- | :--- |
+| `--device-name` | `-d` | Bluetooth device name of the board that runs the project (default: `"BLUESCRIPT"`). **ESP32 only** — must match the name set during `bscript board flash-runtime`. |
+
+**Example:**
+```bash
+bscript workspace create robot-swarm
+cd robot-swarm
+bscript project create sensor --board esp32
+bscript project create sim --board host
+bscript workspace add sensor --device-name BS-SENSOR
+bscript workspace add sim
+```
+
+---
+
+### `bscript workspace remove`
+
+Removes a project from the workspace. Only the entry in `bsworkspace.json` is removed; the project directory is kept. Run it anywhere inside the workspace directory.
+
+```bash
+bscript workspace remove <project-path>
+```
+
+**Arguments:**
+*   `<project-path>`: Path to the project directory. The directory does not need to exist anymore.
+
+**Example:**
+```bash
+bscript workspace remove sim
+```
+
+---
+
+### `bscript workspace run`
+
+Compiles the projects in the workspace and runs them at the same time. Run it anywhere inside the workspace directory.
+
+```bash
+bscript workspace run [project-names...]
+```
+
+**Arguments:**
+*   `[project-names...]`: Names of the projects to run. If omitted, every project in the workspace runs.
+
+The CLI connects to every board, compiles and loads each project, and then starts all of the programs together. Each line of program output is prefixed with the project name:
+
+```
+[sensor  ] temp=24.1
+[sim     ] step 1
+[actuator] motor on
+```
+
+If any project fails before execution (for example, a compile error or a board that cannot be found), no program is started. After execution starts, a board that disconnects is reported and the other projects keep running. The command ends when every program has finished, or when you type `Ctrl-D`.
+
+---
+
+
 ## Board Management
 
 These commands manage the toolchains and runtime environments for specific hardware platforms.

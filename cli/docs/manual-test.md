@@ -47,7 +47,7 @@ Use a clean working directory for project commands (no existing `bsconfig.json` 
 
 ### Automated integration tests (host)
 
-Host integration tests live in `cli/tests/integration/`. They spawn the real host `shell` binary and exercise `project run` and `repl` end-to-end on disk (no ESP32, no global `bscript` install).
+Host integration tests live in `cli/tests/integration/`. They spawn the real host `shell` binary and exercise `project run`, `repl`, and `workspace run` end-to-end on disk (no ESP32, no global `bscript` install).
 
 | Requirement | Detail |
 | :--- | :--- |
@@ -57,7 +57,7 @@ Host integration tests live in `cli/tests/integration/`. They spawn the real hos
 
 ```bash
 cd cli
-npm run test:integration   # integration only (14 tests)
+npm run test:integration   # integration only (18 tests)
 npm run test:all           # unit + integration
 ```
 
@@ -672,6 +672,65 @@ Each item has an ID for bug reports and test records. Record pass/fail in the [t
 
 ---
 
+### `bscript workspace`
+
+#### MT-WS-01: Create a workspace
+
+- **Priority:** P1 · **Requires:** both
+- **Steps:** Run `bscript workspace create test-ws`, then run it again
+- **Expected:** First run creates `test-ws/bsworkspace.json` with `"projects": []`; second run fails with `already exists`
+
+#### MT-WS-02: Add projects
+
+- **Priority:** P1 · **Requires:** both
+- **Steps:** Inside `test-ws`, create an ESP32 project and a host project, then run `bscript workspace add <esp32-project> -d <name>` and `bscript workspace add <host-project>`
+- **Expected:** Both are added to `bsworkspace.json` with paths relative to the workspace (`./...`); `deviceName` is stored only for the ESP32 project
+
+#### MT-WS-03: Add rejects invalid projects
+
+- **Priority:** P2 · **Requires:** both
+- **Steps:** Try `bscript workspace add <host-project> -d X`; add a second ESP32 project without `-d`; add the same project twice; run `bscript workspace add` outside any workspace
+- **Expected:** Each fails with a clear message; `bsworkspace.json` is unchanged
+
+#### MT-WS-04: Run host projects together
+
+- **Priority:** P0 · **Requires:** host
+- **Steps:** Add two host projects that print output, then run `bscript workspace run`
+- **Expected:** Steps Connecting → Initializing → Compiling → Loading are shown per project; every output line starts with `[project-name]`; exit code `0`
+
+#### MT-WS-05: Run two ESP32 boards and a host project
+
+- **Priority:** P0 · **Requires:** esp32 (two boards) + host
+- **Precondition:** Two boards flashed with different names (`bscript board flash-runtime esp32 -d BS-A` / `-d BS-B`); both added with matching `-d`
+- **Steps:** Run `bscript workspace run`
+- **Expected:** Both boards connect (one after the other) without timing out; output from all three projects appears with prefixes; Ctrl-D exits and disconnects every board
+
+#### MT-WS-06: Board disconnects during run
+
+- **Priority:** P1 · **Requires:** esp32 (two boards)
+- **Steps:** While MT-WS-05 is running a long program, power off one board
+- **Expected:** `[name] Disconnected.` is shown; the other projects keep running; after Ctrl-D, exit code is `1`
+
+#### MT-WS-07: Failure before execution
+
+- **Priority:** P1 · **Requires:** both
+- **Steps:** Break one project's source (compile error) or power off one board, then run `bscript workspace run`
+- **Expected:** The failing project is reported; no program starts; every connection is closed; exit code `1`
+
+#### MT-WS-08: Run a subset
+
+- **Priority:** P2 · **Requires:** both
+- **Steps:** Run `bscript workspace run <name>` and `bscript workspace run unknown-name`
+- **Expected:** Only the named project runs; an unknown name fails before connecting
+
+#### MT-WS-09: Remove a project
+
+- **Priority:** P2 · **Requires:** both
+- **Steps:** Run `bscript workspace remove <project>`; run it again for the same project; delete another project's directory, then remove it; run `bscript workspace remove` outside any workspace
+- **Expected:** The entry is removed from `bsworkspace.json` and the project directory is kept; removing a project that is not in the workspace or running outside a workspace fails with a clear message; a project whose directory is gone can still be removed
+
+---
+
 ## End-to-end scenarios
 
 ### Scenario A: Host (no hardware)
@@ -751,6 +810,8 @@ Jest **unit** tests in `cli/tests/` mock filesystem, network, and device I/O. **
 | `project check` | — | — | Real compiler, Inline C |
 | `project run` | Handler wiring | Normal run; built-in; functions/variables; local import; local package import; inline C; `.c` / `.h` includes; compile error (`run.host.test.ts`) | Ctrl-D / TTY; `--with-repl`; `--with-notebook`; ESP32; BLE connect by `deviceName`; device name mismatch errors; real `project install` packages |
 | `repl` | — | Entry line; built-in; variable/function persistence; compile-error recovery (`repl.host.test.ts`) | Interactive session; ESP32; BLE connect by `-d`; device name mismatch errors; global REPL without mocked readline |
+| `workspace create` / `add` / `remove` | File generation; path normalization; duplicate name / path / `deviceName` checks; remove by path | — | — |
+| `workspace run` | BLE connections run one at a time (`ble-connect-lock.test.ts`) | Two host projects with prefixed output; subset by name; compile error stops everything; unknown name (`workspace/run.host.test.ts`) | Ctrl-D / TTY; multiple ESP32 boards; disconnect during run |
 | WebSocket / device protocol | Unit tests | — | Browser Notebook integration |
 | Global help / version | — | — | Quick smoke items |
 
@@ -768,3 +829,6 @@ Jest **unit** tests in `cli/tests/` mock filesystem, network, and device I/O. **
 | REPL entry line | MT-REPL-02 (host) |
 | REPL variables / functions across lines | MT-REPL-07, MT-REPL-08 (host) |
 | REPL continues after compile error | MT-REPL-04 (host) |
+| Workspace: two host projects with prefixed output | MT-WS-04 |
+| Workspace: compile error stops everything | MT-WS-07 (host) |
+| Workspace: subset by name / unknown name | MT-WS-08 |

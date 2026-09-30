@@ -2,11 +2,18 @@ import { Buffer } from "node:buffer";
 import { MemoryImage, MemoryLayout } from "@bscript/lang";
 import { DEFAULT_DEVICE_NAME } from "../../config/project-config";
 import { logger } from "../../core/logger";
+import { AsyncLock } from "../../core/async";
 import { Connection, ConnectionMessage, Service } from "../common";
 import { Protocol, ProtocolPacketBuilder, ProtocolParser } from "../device-protocol";
 import { BleTransport, createBleTransport } from "./transport";
 
 const MTU = 495;
+
+/**
+ * Scanning is shared by the whole process (noble) or adapter (BlueZ), so
+ * concurrent connection attempts would stop each other's scans.
+ */
+const connectLock = new AsyncLock();
 
 export type DeviceServiceEvents = {
     log: (message: string) => void;
@@ -115,7 +122,15 @@ export class BleConnection extends Connection<Buffer> {
         });
     }
 
+    /**
+     * Connection attempts across all instances run one at a time. The timeout
+     * starts only after this attempt acquires the lock.
+     */
     public async connect(timeoutMs: number = 5000): Promise<void> {
+        await connectLock.runExclusive(() => this.connectExclusive(timeoutMs));
+    }
+
+    private async connectExclusive(timeoutMs: number): Promise<void> {
         let timeoutHandle: NodeJS.Timeout | undefined;
         this.status = "connecting";
         const connectPromise = this.transport.connect(this.deviceName);
@@ -156,7 +171,8 @@ export class BleConnection extends Connection<Buffer> {
             `  2. Does the device name match between flash and connect?\n` +
             `     Connect is looking for: "${this.deviceName}"\n` +
             `     Flash sets the name via \`bscript board flash-runtime <board> -d <name>\`.\n` +
-            `     Connect uses \`-d\` / \`--device-name\` with \`bscript project run\` or \`bscript repl\`.\n` +
+            `     Connect uses \`-d\` / \`--device-name\` with \`bscript project run\` or \`bscript repl\`,\n` +
+            `     and \`deviceName\` in bsworkspace.json with \`bscript workspace run\`.\n` +
             `     When omitted, the default is "${DEFAULT_DEVICE_NAME}".\n` +
             `     If the names differ, re-flash or pass \`-d\` with the matching name.`,
         );

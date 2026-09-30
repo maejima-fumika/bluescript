@@ -27,7 +27,11 @@ export async function runStep<T>(message: string, action: () => Promise<T | Step
 }
 
 export class LoadStepLogger {
-    private readonly messagePrefix = "Loading...";
+    private readonly messagePrefix: string;
+
+    constructor(prefix?: string) {
+        this.messagePrefix = prefix ? `${prefix} Loading...` : "Loading...";
+    }
 
     start() {
         logUpdater.update(INFO_PREFIX, this.messagePrefix);
