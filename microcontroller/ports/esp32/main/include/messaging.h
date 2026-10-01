@@ -16,6 +16,7 @@ void bs_messaging_send_null(value_t dst, value_t tag);
 void bs_messaging_send_integer_array(value_t dst, value_t tag, value_t value);
 void bs_messaging_send_float_array(value_t dst, value_t tag, value_t value);
 void bs_messaging_send_boolean_array(value_t dst, value_t tag, value_t value);
+void bs_messaging_send_array(value_t dst, value_t tag, value_t value);
 
 void bs_messaging_broadcast_integer(value_t tag, int32_t value);
 void bs_messaging_broadcast_float(value_t tag, float value);
@@ -25,6 +26,7 @@ void bs_messaging_broadcast_null(value_t tag);
 void bs_messaging_broadcast_integer_array(value_t tag, value_t value);
 void bs_messaging_broadcast_float_array(value_t tag, value_t value);
 void bs_messaging_broadcast_boolean_array(value_t tag, value_t value);
+void bs_messaging_broadcast_array(value_t tag, value_t value);
 
 int32_t bs_messaging_receive_integer(value_t src, value_t tag);
 float bs_messaging_receive_float(value_t src, value_t tag);
@@ -34,5 +36,7 @@ void bs_messaging_receive_null(value_t src, value_t tag);
 value_t bs_messaging_receive_integer_array(value_t src, value_t tag);
 value_t bs_messaging_receive_float_array(value_t src, value_t tag);
 value_t bs_messaging_receive_boolean_array(value_t src, value_t tag);
+// An any[] holds only integers, floats, booleans, null and strings.
+value_t bs_messaging_receive_array(value_t src, value_t tag);
 
 #endif /* __BS_MESSAGING__ */

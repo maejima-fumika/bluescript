@@ -163,6 +163,20 @@ function receiveBooleanArray(src: string, tag: string): boolean[] {
     return value
 }
 
+function sendArray(dst: string, tag: string, value: any[]) {
+    code`bs_messaging_send_array(${dst}, ${tag}, ${value});`
+}
+
+function broadcastArray(tag: string, value: any[]) {
+    code`bs_messaging_broadcast_array(${tag}, ${value});`
+}
+
+function receiveArray(src: string, tag: string): any[] {
+    let value: any[] = []
+    code`${value} = bs_messaging_receive_array(${src}, ${tag});`
+    return value
+}
+
 class Console {
     log(message: any) {
         code`

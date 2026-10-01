@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 /** The types a message between workspace projects can carry. */
 export type MessageType =
     | 'integer' | 'float' | 'boolean' | 'string' | 'null'
-    | 'integer[]' | 'float[]' | 'boolean[]';
+    | 'integer[]' | 'float[]' | 'boolean[]' | 'any[]';
 
 /** A value sent by `sendInteger`, `sendString`, `broadcastFloatArray`, ... */
 export type MessageValue =
@@ -15,7 +15,15 @@ export type MessageValue =
     | { type: 'null' }
     | { type: 'integer[]'; value: number[] }
     | { type: 'float[]'; value: number[] }
-    | { type: 'boolean[]'; value: boolean[] };
+    | { type: 'boolean[]'; value: boolean[] }
+    | { type: 'any[]'; value: ArrayElement[] };
+
+/** What an `any[]` message can hold: no nested arrays or other objects. */
+export type ArrayElement = Extract<MessageValue, { type: 'integer' | 'float' | 'boolean' | 'null' | 'string' }>;
+
+export function isArrayElement(message: MessageValue): message is ArrayElement {
+    return ['integer', 'float', 'boolean', 'null', 'string'].includes(message.type);
+}
 
 export const NULL_MESSAGE: MessageValue = { type: 'null' };
 

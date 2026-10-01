@@ -188,6 +188,7 @@ describe('MessageRouter with typed values', () => {
         { type: 'integer[]', value: [1, 2] },
         { type: 'float[]', value: [] },
         { type: 'boolean[]', value: [true, false] },
+        { type: 'any[]', value: [{ type: 'integer', value: 1 }, { type: 'string', value: Buffer.from('x') }] },
     ];
 
     test('delivers every type in order through one queue', async () => {
@@ -220,6 +221,14 @@ describe('MessageRouter with typed values', () => {
         const next = router.portFor('b').receive('a', 't', 'string');
         router.portFor('a').send('b', 't', { type: 'string', value: Buffer.from('ok') });
         await expect(next).resolves.toEqual({ type: 'string', value: Buffer.from('ok') });
+    });
+
+    test('keeps any[] apart from the typed arrays', async () => {
+        const router = new MessageRouter(['a', 'b']);
+        router.portFor('a').send('b', 't', { type: 'integer[]', value: [1] });
+        await expect(router.portFor('b').receive('a', 't', 'any[]')).rejects.toThrow(
+            'Type mismatch: a sent an integer[] with tag "t", but b expected an any[].',
+        );
     });
 
     test('rejects a send the receiver cannot take', async () => {

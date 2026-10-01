@@ -372,6 +372,44 @@ static value_t fbody_receiveBooleanArray(value_t self, value_t _src, value_t _ta
 }
 PORT_DATA_SECTION const struct func_body _receiveBooleanArray = { fbody_receiveBooleanArray, "(ss)[b" };
 
+static void fbody_sendArray(value_t self, value_t _dst, value_t _tag, value_t _value) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[3] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  func_rootset.values[2] = _value;
+  {
+    bs_messaging_send_array(func_rootset.values[0], func_rootset.values[1], func_rootset.values[2]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _sendArray = { fbody_sendArray, "(ss[a)v" };
+
+static void fbody_broadcastArray(value_t self, value_t _tag, value_t _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _tag;
+  func_rootset.values[1] = _value;
+  {
+    bs_messaging_broadcast_array(func_rootset.values[0], func_rootset.values[1]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _broadcastArray = { fbody_broadcastArray, "(s[a)v" };
+
+static value_t fbody_receiveArray(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    func_rootset.values[3] = gc_make_array((void*)0, 0);
+    func_rootset.values[3] = bs_messaging_receive_array(func_rootset.values[0], func_rootset.values[1]);;
+    { value_t ret_value_ = (func_rootset.values[3]); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+PORT_DATA_SECTION const struct func_body _receiveArray = { fbody_receiveArray, "(ss)[a" };
+
 
 void mth_0_Console(value_t self, value_t _message) {
   ROOT_SET_N(func_rootset,2,VALUE_UNDEF_2)

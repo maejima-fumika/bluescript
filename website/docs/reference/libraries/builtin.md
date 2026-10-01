@@ -38,6 +38,7 @@ When programs are started by [`bscript workspace run`](../cli.md#bscript-workspa
 | `integer[]` | `sendIntegerArray(dst, tag, value)` | `broadcastIntegerArray(tag, value)` | `receiveIntegerArray(src, tag): integer[]` |
 | `float[]` | `sendFloatArray(dst, tag, value)` | `broadcastFloatArray(tag, value)` | `receiveFloatArray(src, tag): float[]` |
 | `boolean[]` | `sendBooleanArray(dst, tag, value)` | `broadcastBooleanArray(tag, value)` | `receiveBooleanArray(src, tag): boolean[]` |
+| `any[]` | `sendArray(dst, tag, value)` | `broadcastArray(tag, value)` | `receiveArray(src, tag): any[]` |
 
 **Parameters**
 - `dst` / `src` (string): The name of the receiving / sending project, as shown in `bsworkspace.json`. It must be another project.
@@ -53,6 +54,8 @@ When programs are started by [`bscript workspace run`](../cli.md#bscript-workspa
 **Types**
 The receiving function must match the type of the message: a value sent with `sendFloat` must be received with `receiveFloat`. Otherwise `receive*` throws a runtime error (`type mismatch`) and that message is discarded.
 
+`any[]` is a type of its own: an array sent with `sendArray` must be received with `receiveArray`, and an `integer[]` sent with `sendIntegerArray` cannot be received with `receiveArray`. The elements of an `any[]` can only be integers, floats, booleans, `null` and strings; `sendArray` throws a runtime error when it holds anything else, such as another array or an object (`unsupported element` on ESP32).
+
 **Size limits**
 Strings and arrays are sent in one piece:
 - To or from an ESP32 board, a message must fit in one Bluetooth packet: about 490 bytes, including the project name and tag on the sending side. For example, an `integer[]` of about 120 elements. The size of a value is checked when it is sent, so `send*` and `broadcast*` throw a runtime error when the receiver cannot take it (`value too large`). A broadcast is then sent to nobody.
@@ -63,6 +66,7 @@ Strings and arrays are sent in one piece:
 - `dst` or `src` is the project itself, or is not one of the projects being run.
 - `dst` has already finished, or `src` has finished without sending a matching message. Messages that `src` sent before finishing can still be received.
 - The message is of another type, or is too large (see above).
+- An `any[]` holds an element other than an integer, float, boolean, `null` or string.
 - Every running project is waiting in `receive*` (a deadlock).
 - The program is not run by `bscript workspace run`.
 

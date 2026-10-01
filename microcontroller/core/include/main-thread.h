@@ -22,7 +22,8 @@ void CORE_TEXT_SECTION bs_main_thread_set_profile(uint8_t fid, char* profile);
 typedef struct {
     uint8_t type;
     union { int32_t i; float f; } scalar;   // integer, float and boolean values
-    uint16_t count;                         // string and array values: the number of elements
+    uint16_t count;                         // string and array values: the number of elements,
+    uint16_t size;                          // ... the number of bytes in `data`,
     uint8_t* data;                          // ... and their bytes (malloc'd; the receiver frees it)
 } bs_message_reply_t;
 

@@ -207,6 +207,35 @@ int bs_protocol_write_receive(const char* src, const char* tag, uint8_t type) {
     return write_message_request(PROTOCOL_RECEIVE, src, tag, type, 0, NULL, NULL);
 }
 
+// The number of bytes the `count` elements of an any[] take, or UINT32_MAX when they are
+// malformed or longer than `len` bytes. Each is | type(1) | value |.
+static uint32_t any_array_size(const uint8_t* elements, uint32_t len, uint16_t count) {
+    uint32_t size = 0;
+    for (uint16_t i = 0; i < count; i++) {
+        if (size + 1 > len) return UINT32_MAX;
+        uint8_t type = elements[size++];
+        uint32_t value_size;
+        switch (type) {
+            case BS_MSG_INTEGER:
+            case BS_MSG_FLOAT:   value_size = 4; break;
+            case BS_MSG_BOOLEAN: value_size = 1; break;
+            case BS_MSG_NULL:    value_size = 0; break;
+            case BS_MSG_STRING: {
+                if (size + 2 > len) return UINT32_MAX;
+                uint16_t n;
+                memcpy(&n, elements + size, 2);
+                value_size = 2 + n;
+                break;
+            }
+            default:
+                return UINT32_MAX;
+        }
+        size += value_size;
+        if (size > len) return UINT32_MAX;
+    }
+    return size;
+}
+
 // Reads the value of a Reply at `value` (after the type byte) into `reply`, and
 // returns its length, or -1 when it is malformed or longer than `len` bytes.
 // Fixed-size values are kept in `reply`; the bytes of variable-size values are
@@ -234,15 +263,19 @@ static int32_t read_reply_value(uint8_t type, const uint8_t* value, uint32_t len
         case BS_MSG_FLOAT_ARRAY:
             elem_size = 4;
             break;
+        case BS_MSG_ANY_ARRAY:
+            elem_size = 0;      // each element has its own size
+            break;
         default:
             return -1;
     }
     if (len < 2) return -1;
     uint16_t count;
     memcpy(&count, value, 2);
-    uint32_t size = count * elem_size;
-    if (len < 2 + size) return -1;
+    uint32_t size = elem_size > 0 ? count * elem_size : any_array_size(value + 2, len - 2, count);
+    if (size == UINT32_MAX || len < 2 + size) return -1;
     reply->count = count;
+    reply->size = (uint16_t)size;
     reply->data = (uint8_t*)malloc(size > 0 ? size : 1);
     if (reply->data == NULL)
         *error = "out of memory";

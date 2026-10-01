@@ -88,6 +88,14 @@ describe('host message value text', () => {
         [{ type: 'integer[]', value: [] }, 'I'],
         [{ type: 'float[]', value: [0.5, Infinity, -Infinity] }, 'F0.5,inf,-inf'],
         [{ type: 'boolean[]', value: [true, false, true] }, 'B101'],
+        [{
+            type: 'any[]',
+            value: [
+                { type: 'integer', value: 1 }, { type: 'float', value: -0.5 }, { type: 'boolean', value: true },
+                { type: 'null' }, { type: 'string', value: Buffer.from('a,b') },
+            ],
+        }, 'Ai1,f-0.5,b1,n,s612c62'],
+        [{ type: 'any[]', value: [] }, 'A'],
     ])('formats and parses %j as %s', (value, text) => {
         expect(formatHostValue(value)).toBe(text);
         expect(parseHostValue(text)).toEqual(value);
@@ -101,7 +109,7 @@ describe('host message value text', () => {
     });
 
     test('rejects malformed values', () => {
-        for (const text of ['i1.5', 'i99999999999', 'b2', 'nx', 's6', 'Ia', 'B12', 'x1', '']) {
+        for (const text of ['i1.5', 'i99999999999', 'b2', 'nx', 's6', 'Ia', 'B12', 'x1', '', 'AI1', 'Ai1,']) {
             expect(() => parseHostValue(text)).toThrow();
         }
     });

@@ -233,6 +233,51 @@ console.log(ba[1]);`,
             exitSpy.mockRestore();
         });
 
+        it('exchanges any[] arrays', async () => {
+            const { exitSpy, output, text } = await runWorkspace({
+                alpha: `
+const a: any[] = [7, 2.5, false, null, "a,b"];
+sendArray("beta", "t", a);
+const empty: any[] = [];
+broadcastArray("e", empty);`,
+                beta: `
+const a = receiveArray("alpha", "t");
+console.log(a.length);
+console.log(a[0]);
+console.log(a[1]);
+console.log(a[2]);
+console.log(a[3]);
+console.log(a[4]);
+console.log(receiveArray("alpha", "e").length);`,
+            });
+
+            expectExitCode(exitSpy, 0, output);
+            const betaLines = text.split('\n')
+                .filter((line) => line.startsWith('[beta ]'))
+                .map((line) => line.replace(/^\[beta \] /, '').trim());
+            expect(betaLines).toEqual(['5', '7', '2.500000', 'false', 'undefined', "'a,b'", '0']);
+            exitSpy.mockRestore();
+        });
+
+        it('rejects an any[] holding other values, and keeps it apart from typed arrays', async () => {
+            const { exitSpy, text } = await runWorkspace({
+                alpha: `
+const ia: integer[] = [1];
+sendIntegerArray("beta", "t", ia);
+const nested: any[] = [1, ia];
+sendArray("beta", "t", nested);
+console.log("unreachable");`,
+                beta: `
+console.log(receiveArray("alpha", "t"));
+console.log("unreachable");`,
+            });
+
+            expect(text).toMatch(/\[alpha\].*runtime error: cannot send element 1 of the array/);
+            expect(text).toMatch(/\[beta \].*runtime error: Type mismatch: alpha sent an integer\[\] with tag "t", but beta expected an any\[\]\./);
+            expect(text).not.toContain('unreachable');
+            exitSpy.mockRestore();
+        });
+
         it('broadcasts a string and sends a long one', async () => {
             const { exitSpy, output, text } = await runWorkspace({
                 alpha: `

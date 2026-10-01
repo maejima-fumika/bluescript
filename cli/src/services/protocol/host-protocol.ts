@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { isInt32, MessageType, MessageValue } from "./message-value";
+import { isArrayElement, isInt32, MessageType, MessageValue } from "./message-value";
 
 export enum HostProtocol {
     None = 0,
@@ -51,6 +51,7 @@ const TYPE_CHARS: Record<MessageType, string> = {
     'integer[]': 'I',
     'float[]': 'F',
     'boolean[]': 'B',
+    'any[]': 'A',
 };
 
 const TYPES_BY_CHAR = Object.fromEntries(
@@ -60,7 +61,8 @@ const TYPES_BY_CHAR = Object.fromEntries(
 /**
  * <type char><text>. Integers and floats are decimal (floats may be `inf`, `-inf` or `nan`),
  * booleans are 0 / 1, strings are the hex of their bytes, arrays are comma-separated
- * (boolean[] is a run of 0 / 1 digits), and null has no text.
+ * (boolean[] is a run of 0 / 1 digits; any[] is a list of values with their type chars,
+ * which never contain a comma), and null has no text.
  */
 export function formatHostValue(message: MessageValue): string {
     const char = TYPE_CHARS[message.type];
@@ -81,6 +83,8 @@ export function formatHostValue(message: MessageValue): string {
             return `${char}${message.value.map(formatFloat).join(',')}`;
         case 'boolean[]':
             return `${char}${message.value.map((v) => (v ? 1 : 0)).join('')}`;
+        case 'any[]':
+            return `${char}${message.value.map(formatHostValue).join(',')}`;
     }
 }
 
@@ -119,6 +123,15 @@ export function parseHostValue(text: string): MessageValue {
         case 'boolean[]':
             if (!/^[01]*$/.test(body)) throw fail();
             return { type, value: [...body].map((v) => v === '1') };
+        case 'any[]':
+            return {
+                type,
+                value: splitList(body).map((v) => {
+                    const element = parseHostValue(v);
+                    if (!isArrayElement(element)) throw fail();
+                    return element;
+                }),
+            };
         default:
             throw new Error(`Failed to parse message. Unknown value type: ${text}`);
     }

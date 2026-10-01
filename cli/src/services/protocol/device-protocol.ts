@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { MemoryLayout } from "@bscript/lang";
-import { MessageType, MessageValue } from "./message-value";
+import { isArrayElement, MessageType, MessageValue } from "./message-value";
 
 
 export enum Protocol {
@@ -33,6 +33,7 @@ export enum MessageValueType {
     IntegerArray = 5,
     FloatArray = 6,
     BooleanArray = 7,
+    AnyArray = 8,
 }
 
 const TYPE_CODES: Record<MessageType, MessageValueType> = {
@@ -44,6 +45,7 @@ const TYPE_CODES: Record<MessageType, MessageValueType> = {
     'integer[]': MessageValueType.IntegerArray,
     'float[]': MessageValueType.FloatArray,
     'boolean[]': MessageValueType.BooleanArray,
+    'any[]': MessageValueType.AnyArray,
 };
 
 const TYPE_NAMES = Object.fromEntries(
@@ -56,7 +58,8 @@ const MAX_ELEMENT_COUNT = 0xffff;   // count(2)
  * | type(1) | value |
  * Fixed-size values are written as is (int32, float32, u8, or nothing for null).
  * Variable-size values are | count(2) | elements |: bytes for a string, u8 for boolean[],
- * int32 / float32 for integer[] / float[]. Everything is little-endian.
+ * int32 / float32 for integer[] / float[], and | type(1) | value | for any[].
+ * Everything is little-endian.
  */
 export function encodeMessageValue(message: MessageValue): Buffer {
     const type = Buffer.from([TYPE_CODES[message.type]]);
@@ -92,6 +95,10 @@ export function encodeMessageValue(message: MessageValue): Buffer {
         case 'boolean[]':
             return Buffer.concat([
                 type, encodeCount(message.value.length), Buffer.from(message.value.map((v) => (v ? 1 : 0))),
+            ]);
+        case 'any[]':
+            return Buffer.concat([
+                type, encodeCount(message.value.length), ...message.value.map(encodeMessageValue),
             ]);
     }
 }
@@ -449,6 +456,17 @@ class MessageReader {
             case 'boolean[]': {
                 const count = this.readCount();
                 return { type, value: [...this.read(count)].map((b) => b !== 0) };
+            }
+            case 'any[]': {
+                const count = this.readCount();
+                const value = Array.from({ length: count }, () => {
+                    const element = this.readValue();
+                    if (!isArrayElement(element)) {
+                        throw new Error(`Failed to parse message. An any[] cannot hold ${element.type}.`);
+                    }
+                    return element;
+                });
+                return { type, value };
             }
         }
     }

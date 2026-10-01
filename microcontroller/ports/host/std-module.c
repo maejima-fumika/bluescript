@@ -143,6 +143,35 @@ static void msg_format_boolean_array(value_t value) {
         msg_append("%d", *gc_bytearray_get(value, i) ? 1 : 0);
 }
 
+// An any[] holds only integers, floats, booleans, null and strings.
+static void msg_format_array(value_t value) {
+    msg_begin(MSG_TYPE_ANY_ARRAY);
+    int32_t n = gc_array_length(value);
+    for (int32_t i = 0; i < n; i++) {
+        value_t v = *gc_array_get(value, i);
+        const char* sep = i == 0 ? "" : ",";
+        if (is_int_value(v))
+            msg_append("%s%c%d", sep, MSG_TYPE_INTEGER, (int)value_to_int(v));
+        else if (is_float_value(v))
+            msg_append("%s%c%.9g", sep, MSG_TYPE_FLOAT, value_to_float(v));
+        else if (is_bool_value(v))
+            msg_append("%s%c%d", sep, MSG_TYPE_BOOLEAN, v == VALUE_TRUE ? 1 : 0);
+        else if (v == VALUE_NULL || v == VALUE_UNDEF)
+            msg_append("%s%c", sep, MSG_TYPE_NULL);
+        else if (gc_is_string_object(v)) {
+            msg_append("%s%c", sep, MSG_TYPE_STRING);
+            for (const unsigned char* p = (const unsigned char*)gc_string_to_cstr(v); *p != '\0'; p++)
+                msg_append("%02x", *p);
+        }
+        else {
+            snprintf(messaging_error, sizeof(messaging_error),
+                     "cannot send element %d of the array: an any[] can only hold integers, floats, "
+                     "booleans, null and strings", (int)i);
+            runtime_error(messaging_error);
+        }
+    }
+}
+
 // Converts the received text into a value of each type.
 
 static int32_t msg_parse_integer(const char* text) {
@@ -205,6 +234,38 @@ static value_t msg_parse_float_array(const char* text) {
     return array;
 }
 
+// Makes the value of one element of an any[], written as <type char><text> in [p, end).
+static value_t msg_parse_element(const char* p, const char* end) {
+    static char token[MAX_PAYLOAD_SIZE + 1];
+    int32_t len = (int32_t)(end - p);
+    memcpy(token, p, len);
+    token[len] = '\0';
+    switch (token[0]) {
+        case MSG_TYPE_INTEGER: return int_to_value(msg_parse_integer(token + 1));
+        case MSG_TYPE_FLOAT:   return float_to_value(msg_parse_float(token + 1));
+        case MSG_TYPE_BOOLEAN: return bool_to_value(msg_parse_boolean(token + 1));
+        case MSG_TYPE_STRING:  return msg_parse_string(token + 1);
+        default:               return VALUE_NULL;
+    }
+}
+
+static value_t msg_parse_array(const char* text) {
+    int32_t n = msg_count_list(text);
+    ROOT_SET(rootset, 1)
+    rootset.values[0] = gc_new_array(NULL, n, VALUE_UNDEF);
+    const char* p = text;
+    for (int32_t i = 0; i < n; i++) {
+        const char* end = strchr(p, ',');
+        if (end == NULL)
+            end = p + strlen(p);
+        gc_array_set(rootset.values[0], i, msg_parse_element(p, end));
+        p = *end == ',' ? end + 1 : end;
+    }
+    value_t array = rootset.values[0];
+    DELETE_ROOT_SET(rootset)
+    return array;
+}
+
 static value_t msg_parse_boolean_array(const char* text) {
     int32_t n = (int32_t)strlen(text);
     value_t array = gc_new_bytearray(true, n, 0);
@@ -260,6 +321,9 @@ extern struct func_body _receiveFloatArray;
 extern struct func_body _sendBooleanArray;
 extern struct func_body _broadcastBooleanArray;
 extern struct func_body _receiveBooleanArray;
+extern struct func_body _sendArray;
+extern struct func_body _broadcastArray;
+extern struct func_body _receiveArray;
 void mth_0_Console(value_t self, value_t _message);
 void mth_1_Console(value_t self, value_t _message);
 float mth_0_Time(value_t self);
@@ -586,6 +650,44 @@ static value_t fbody_receiveBooleanArray(value_t self, value_t _src, value_t _ta
   }
 }
 struct func_body _receiveBooleanArray = { fbody_receiveBooleanArray, "(ss)[b" };
+
+static void fbody_sendArray(value_t self, value_t _dst, value_t _tag, value_t _value) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[3] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  func_rootset.values[2] = _value;
+  {
+    msg_format_array(func_rootset.values[2]); msg_send(func_rootset.values[0], func_rootset.values[1]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+struct func_body _sendArray = { fbody_sendArray, "(ss[a)v" };
+
+static void fbody_broadcastArray(value_t self, value_t _tag, value_t _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _tag;
+  func_rootset.values[1] = _value;
+  {
+    msg_format_array(func_rootset.values[1]); msg_broadcast(func_rootset.values[0]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+struct func_body _broadcastArray = { fbody_broadcastArray, "(s[a)v" };
+
+static value_t fbody_receiveArray(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    func_rootset.values[3] = gc_make_array((void*)0, 0);
+    func_rootset.values[3] = msg_parse_array(msg_receive(func_rootset.values[0], func_rootset.values[1], MSG_TYPE_ANY_ARRAY));;
+    { value_t ret_value_ = (func_rootset.values[3]); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+struct func_body _receiveArray = { fbody_receiveArray, "(ss)[a" };
 
 void mth_0_Console(value_t self, value_t _message) {
   ROOT_SET_N(func_rootset,2,VALUE_UNDEF_2)

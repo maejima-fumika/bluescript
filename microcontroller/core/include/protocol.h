@@ -36,6 +36,7 @@ void CORE_TEXT_SECTION bs_protocol_write_memory_layout(bs_memory_layout_t* layou
 #define BS_MSG_INTEGER_ARRAY  5   // count(2) + int32 x count
 #define BS_MSG_FLOAT_ARRAY    6   // count(2) + float32 x count
 #define BS_MSG_BOOLEAN_ARRAY  7   // count(2) + u8 x count
+#define BS_MSG_ANY_ARRAY      8   // count(2) + (type(1) + value) x count; integer, float, boolean, null or string
 
 // Writes the `value_len` bytes of a value (the part after the type byte) to `out`.
 typedef void (*bs_value_writer_t)(uint8_t* out, void* arg);

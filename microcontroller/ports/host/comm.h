@@ -44,6 +44,7 @@ void bs_comm_send_loadtime(float time);
 #define MSG_TYPE_INTEGER_ARRAY  'I'
 #define MSG_TYPE_FLOAT_ARRAY    'F'
 #define MSG_TYPE_BOOLEAN_ARRAY  'B'
+#define MSG_TYPE_ANY_ARRAY      'A'   // comma-separated values with their type chars
 
 // Messages between the projects in a workspace. `value` is <type char><text>.
 // All block until the CLI replies, and return 0 on success, or -1 with the reason in `error`.

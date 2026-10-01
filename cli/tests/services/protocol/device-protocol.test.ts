@@ -190,6 +190,11 @@ describe('message value encoding', () => {
         ['integer[]', { type: 'integer[]', value: [1, -1] }, [5, 2, 0, 1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]],
         ['float[]', { type: 'float[]', value: [] }, [6, 0, 0]],
         ['boolean[]', { type: 'boolean[]', value: [true, false, true] }, [7, 3, 0, 1, 0, 1]],
+        ['any[]', {
+            type: 'any[]',
+            value: [{ type: 'integer', value: 1 }, { type: 'null' }, { type: 'string', value: Buffer.from('a') }],
+        }, [8, 3, 0, 0, 1, 0, 0, 0, 4, 3, 1, 0, 0x61]],
+        ['empty any[]', { type: 'any[]', value: [] }, [8, 0, 0]],
     ])('encodes and decodes %s', (_name, value, bytes) => {
         expect([...encodeMessageValue(value)]).toEqual(bytes);
         expect(roundTrip(value)).toEqual(value);
@@ -198,6 +203,10 @@ describe('message value encoding', () => {
     test('keeps float specials and rounds to float32', () => {
         const decoded = roundTrip({ type: 'float[]', value: [NaN, Infinity, -Infinity, 0.1] });
         expect(decoded).toEqual({ type: 'float[]', value: [NaN, Infinity, -Infinity, Math.fround(0.1)] });
+    });
+
+    test('rejects an any[] holding an array', () => {
+        expect(() => decodeMessageValue(Buffer.from([8, 1, 0, 5, 0, 0]))).toThrow(/cannot hold integer\[\]/);
     });
 
     test('rejects truncated values and unknown types', () => {
