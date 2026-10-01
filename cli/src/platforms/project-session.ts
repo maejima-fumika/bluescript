@@ -6,7 +6,7 @@ import { withTimeout } from "../core/async";
 import { ProgramOutput } from "../core/program-output";
 import { EventEmitter, EventMap } from "../services/common";
 import { CompileContext, CompilerAdapter, getCompilerAdapter } from "./compiler";
-import { MessagePort } from "./messaging";
+import { MessagePort, MessageValue } from "./messaging";
 import { BoardRuntime, getBoardRuntime } from "./runtime";
 
 const CLOSE_TIMEOUT_MS = 3_000;
@@ -84,6 +84,10 @@ export class ProjectSession extends EventEmitter<ProjectSessionEvents> {
 
     setMessagePort(port: MessagePort): void {
         this.runtime.setMessagePort(port);
+    }
+
+    canReceiveMessage(message: MessageValue): boolean {
+        return this.runtime.canReceiveMessage(message);
     }
 
     async close(): Promise<void> {

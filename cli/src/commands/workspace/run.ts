@@ -65,13 +65,18 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
     private setup() {
         const projects = this.workspaceConfigHandler.resolveProjects(this.projectNames);
         const tags = createTags(projects.map((p) => p.name));
-        const router = new MessageRouter(projects.map((p) => p.name));
+        const sessions = new Map<string, ProjectSession>();
+        const router = new MessageRouter(
+            projects.map((p) => p.name),
+            (dst, message) => sessions.get(dst)?.canReceiveMessage(message) ?? false,
+        );
         this.router = router;
 
         this.members = projects.map((p) => {
             const tag = tags.get(p.name)!;
             const output = new LineOutput(tag);
             const session = new ProjectSession(p.project, this.globalConfigHandler, output, p.deviceName);
+            sessions.set(p.name, session);
             session.setMessagePort(router.portFor(p.name));
             session.on('disconnected', () => {
                 router.close(p.name);

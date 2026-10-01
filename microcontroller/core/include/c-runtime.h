@@ -235,6 +235,7 @@ extern const char* CR_SECTION gc_string_to_cstr(value_t obj);
 extern int32_t CR_SECTION gc_string_length(value_t obj);
 extern char* CR_SECTION gc_any_to_cstring(char* p, value_t obj);
 extern value_t CR_SECTION gc_new_String(value_t s1, value_t s2);
+extern value_t CR_SECTION gc_new_string_copy(const char* bytes, int32_t len);
 
 extern value_t CR_SECTION safe_value_to_intarray(bool nullable, value_t v);
 extern value_t CR_SECTION gc_new_intarray(int32_t n, int32_t init_value);

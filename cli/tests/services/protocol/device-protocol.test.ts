@@ -1,4 +1,7 @@
-import { ProtocolPacketBuilder, ProtocolParser, Protocol, MessageValueType } from '../../../src/services/protocol/device-protocol'
+import {
+    decodeMessageValue, encodeMessageValue, MessageValueType, Protocol, ProtocolPacketBuilder, ProtocolParser,
+} from '../../../src/services/protocol/device-protocol'
+import { MessageValue } from '../../../src/services/protocol/message-value'
 
 
 const BUFFER_SIZE =  17;
@@ -85,7 +88,7 @@ describe('ProtocolPacketBuilder', () => {
 describe('ProtocolPacketBuilder messaging commands', () => {
     test('should add reply command', () => {
         const builder = new ProtocolPacketBuilder(BUFFER_SIZE);
-        builder.reply(-2);
+        builder.reply({ type: 'integer', value: -2 });
         const expectedBuffer = Buffer.from([
             0x03, 0x00, // First Header
             Protocol.Reply,
@@ -128,7 +131,7 @@ describe('ProtocolParser messaging commands', () => {
             0x2a, 0x00, 0x00, 0x00,
         ]);
         expect(new ProtocolParser().parse(buffer)).toEqual({
-            protocol: Protocol.Send, dst: 'beta', tag: 'temp', value: 42,
+            protocol: Protocol.Send, dst: 'beta', tag: 'temp', message: { type: 'integer', value: 42 },
         });
     });
 
@@ -136,7 +139,7 @@ describe('ProtocolParser messaging commands', () => {
         const buffer = Buffer.from([
             Protocol.Send, ...name('a'), ...name(''), MessageValueType.Integer, 0xff, 0xff, 0xff, 0xff,
         ]);
-        expect(new ProtocolParser().parse(buffer)).toMatchObject({ dst: 'a', tag: '', value: -1 });
+        expect(new ProtocolParser().parse(buffer)).toMatchObject({ dst: 'a', tag: '', message: { value: -1 } });
     });
 
     test('should parse receive command', () => {
@@ -144,10 +147,22 @@ describe('ProtocolParser messaging commands', () => {
             Protocol.Receive,
             ...name('alpha'),
             ...name('temp'),
-            MessageValueType.Integer,
+            MessageValueType.FloatArray,
         ]);
         expect(new ProtocolParser().parse(buffer)).toEqual({
-            protocol: Protocol.Receive, src: 'alpha', tag: 'temp',
+            protocol: Protocol.Receive, src: 'alpha', tag: 'temp', expected: 'float[]',
+        });
+    });
+
+    test('should parse broadcast command', () => {
+        const buffer = Buffer.from([
+            Protocol.Broadcast,
+            ...name('temp'),
+            MessageValueType.Integer,
+            0x07, 0x00, 0x00, 0x00,
+        ]);
+        expect(new ProtocolParser().parse(buffer)).toEqual({
+            protocol: Protocol.Broadcast, tag: 'temp', message: { type: 'integer', value: 7 },
         });
     });
 
@@ -158,6 +173,40 @@ describe('ProtocolParser messaging commands', () => {
 
     test('should keep the command numbers the device firmware uses', () => {
         // Must match protocol_t in microcontroller/core/src/protocol.c.
-        expect([Protocol.Send, Protocol.Receive, Protocol.Reply, Protocol.ReplyError]).toEqual([9, 10, 11, 12]);
+        expect([Protocol.Send, Protocol.Receive, Protocol.Reply, Protocol.ReplyError, Protocol.Broadcast])
+            .toEqual([9, 10, 11, 12, 13]);
+    });
+});
+
+describe('message value encoding', () => {
+    const roundTrip = (v: MessageValue) => decodeMessageValue(encodeMessageValue(v));
+
+    test.each<[string, MessageValue, number[]]>([
+        ['integer', { type: 'integer', value: -2 }, [0, 0xfe, 0xff, 0xff, 0xff]],
+        ['float', { type: 'float', value: 1.5 }, [1, 0x00, 0x00, 0xc0, 0x3f]],
+        ['boolean', { type: 'boolean', value: true }, [2, 1]],
+        ['string', { type: 'string', value: Buffer.from('hé') }, [3, 3, 0, 0x68, 0xc3, 0xa9]],
+        ['null', { type: 'null' }, [4]],
+        ['integer[]', { type: 'integer[]', value: [1, -1] }, [5, 2, 0, 1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]],
+        ['float[]', { type: 'float[]', value: [] }, [6, 0, 0]],
+        ['boolean[]', { type: 'boolean[]', value: [true, false, true] }, [7, 3, 0, 1, 0, 1]],
+    ])('encodes and decodes %s', (_name, value, bytes) => {
+        expect([...encodeMessageValue(value)]).toEqual(bytes);
+        expect(roundTrip(value)).toEqual(value);
+    });
+
+    test('keeps float specials and rounds to float32', () => {
+        const decoded = roundTrip({ type: 'float[]', value: [NaN, Infinity, -Infinity, 0.1] });
+        expect(decoded).toEqual({ type: 'float[]', value: [NaN, Infinity, -Infinity, Math.fround(0.1)] });
+    });
+
+    test('rejects truncated values and unknown types', () => {
+        expect(() => decodeMessageValue(Buffer.from([5, 2, 0, 1, 0, 0, 0]))).toThrow(/truncated/);
+        expect(() => decodeMessageValue(Buffer.from([99]))).toThrow(/Unknown value type/);
+    });
+
+    test('builds a reply carrying a string', () => {
+        const [unit] = new ProtocolPacketBuilder(BUFFER_SIZE).reply({ type: 'string', value: Buffer.from('ab') }).build();
+        expect([...unit]).toEqual([0x03, 0x00, Protocol.Reply, MessageValueType.String, 2, 0, 0x61, 0x62]);
     });
 });

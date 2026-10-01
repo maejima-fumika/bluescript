@@ -47,12 +47,12 @@ typedef union {
 static QueueHandle_t task_item_queue;
 
 typedef struct {
-    int32_t value;
+    bs_message_reply_t reply;
     bool is_error;
     char error[REPLY_ERROR_SIZE];
 } reply_item_t;
 
-// Replies to sendInteger / receiveInteger. The main thread waits on this queue
+// Replies to sendInteger / receiveString / ... The main thread waits on this queue
 // while the program runs, so it is separate from task_item_queue.
 static QueueHandle_t reply_queue;
 
@@ -72,7 +72,10 @@ static void main_thread_reset() {
     gc_initialize();
     bs_stdmodule_main();
     xQueueReset(task_item_queue);
-    xQueueReset(reply_queue);
+    // Free the data of a reply that came too late to be received.
+    reply_item_t item;
+    while (xQueueReceive(reply_queue, &item, 0) == pdTRUE)
+        free(item.reply.data);
 }
 
 static float task_call_main(int32_t id, void* address) {
@@ -169,26 +172,30 @@ void bs_main_thread_set_profile(uint8_t fid, char* profile) {
     xQueueSendFromISR(task_item_queue, &task_item, &yield);
 }
 
-void bs_main_thread_set_reply(int32_t value, const char* error) {
+void bs_main_thread_set_reply(const bs_message_reply_t* reply) {
     reply_item_t item;
-    item.value = value;
-    item.is_error = error != NULL;
+    item.reply = *reply;
+    item.is_error = false;
     item.error[0] = '\0';
-    if (error != NULL) {
-        strncpy(item.error, error, REPLY_ERROR_SIZE - 1);
-        item.error[REPLY_ERROR_SIZE - 1] = '\0';
-    }
     xQueueSend(reply_queue, &item, portMAX_DELAY);
 }
 
-int bs_main_thread_wait_reply(int32_t* value, char* error, int error_size) {
+void bs_main_thread_set_reply_error(const char* error) {
+    reply_item_t item;
+    memset(&item.reply, 0, sizeof(item.reply));
+    item.is_error = true;
+    strncpy(item.error, error, REPLY_ERROR_SIZE - 1);
+    item.error[REPLY_ERROR_SIZE - 1] = '\0';
+    xQueueSend(reply_queue, &item, portMAX_DELAY);
+}
+
+int bs_main_thread_wait_reply(bs_message_reply_t* reply, char* error, int error_size) {
     reply_item_t item;
     xQueueReceive(reply_queue, &item, portMAX_DELAY);
     if (item.is_error) {
         snprintf(error, error_size, "%s", item.error);
         return -1;
     }
-    if (value != NULL)
-        *value = item.value;
+    *reply = item.reply;
     return 0;
 }

@@ -18,12 +18,22 @@ void CORE_TEXT_SECTION bs_main_thread_set_event_from_isr(void* fn);
 
 void CORE_TEXT_SECTION bs_main_thread_set_profile(uint8_t fid, char* profile);
 
-// Hands the CLI's reply to a send/receive request to the main thread.
-// `error` is NULL on success; otherwise it is copied.
-void CORE_TEXT_SECTION bs_main_thread_set_reply(int32_t value, const char* error);
+// The CLI's reply to a send, broadcast or receive request (see BS_MSG_* in protocol.h).
+typedef struct {
+    uint8_t type;
+    union { int32_t i; float f; } scalar;   // integer, float and boolean values
+    uint16_t count;                         // string and array values: the number of elements
+    uint8_t* data;                          // ... and their bytes (malloc'd; the receiver frees it)
+} bs_message_reply_t;
 
-// Blocks the main thread until the reply arrives. Returns 0 and sets `value`,
+// Hands a reply to the main thread; `reply` is copied, but `reply->data` is handed over.
+void CORE_TEXT_SECTION bs_main_thread_set_reply(const bs_message_reply_t* reply);
+
+// Hands an error reply to the main thread; `error` is copied.
+void CORE_TEXT_SECTION bs_main_thread_set_reply_error(const char* error);
+
+// Blocks the main thread until the reply arrives. Returns 0 and fills `reply`,
 // or returns -1 and copies the reason into `error`.
-int CORE_TEXT_SECTION bs_main_thread_wait_reply(int32_t* value, char* error, int error_size);
+int CORE_TEXT_SECTION bs_main_thread_wait_reply(bs_message_reply_t* reply, char* error, int error_size);
 
 #endif /* __BS_MAIN_THREAD__ */

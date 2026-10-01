@@ -246,7 +246,7 @@ The CLI connects to every board, compiles and loads each project, and then start
 
 If any project fails before execution (for example, a compile error or a board that cannot be found), no program is started. After execution starts, a board that disconnects is reported and the other projects keep running. The command ends when every program has finished, or when you type `Ctrl-D`.
 
-The programs can exchange integers with the built-in functions [`sendInteger` and `receiveInteger`](./libraries/builtin.md#sendintegerdst-string-tag-string-value-integer-void). The programs never talk to each other directly: every message goes through the CLI, over the same connection that is used for program output. For example, with a workspace containing the projects `controller` and `actuator`:
+The programs can exchange values (integers, floats, booleans, strings, null and arrays) with the built-in functions such as `sendInteger`, `broadcastString` and `receiveFloatArray` (see [Messages Between Projects](./libraries/builtin.md#messages-between-projects)). The programs never talk to each other directly: every message goes through the CLI, over the same connection that is used for program output. For example, with a workspace containing the projects `controller` and `actuator`:
 
 ```ts
 // controller/src/index.bs

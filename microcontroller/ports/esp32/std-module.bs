@@ -4,7 +4,7 @@ code`
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "protocol.h"
-#include "main-thread.h"
+#include "./include/messaging.h"
 #include "c-runtime.h"
 #include "./include/std-module.h"
 
@@ -39,32 +39,6 @@ void write_message_to_buff(value_t message) {
     printf(buff);
 }
 
-static char messaging_error[64];
-
-static void check_request(int result) {
-    if (result == BS_PROTOCOL_ERR_NAME_TOO_LONG)
-        runtime_error("name too long");
-    else if (result == BS_PROTOCOL_ERR_TOO_LARGE)
-        runtime_error("request too long");
-    else if (result == BS_PROTOCOL_ERR_NO_MEMORY)
-        runtime_error("out of memory");
-    else if (result == BS_PROTOCOL_ERR_SEND_FAILED)
-        runtime_error("send failed");
-}
-
-void send_integer(value_t dst, value_t tag, int32_t value) {
-    check_request(bs_protocol_write_send(gc_string_to_cstr(dst), gc_string_to_cstr(tag), value));
-    if (bs_main_thread_wait_reply(NULL, messaging_error, sizeof(messaging_error)) < 0)
-        runtime_error(messaging_error);
-}
-
-int32_t receive_integer(value_t src, value_t tag) {
-    int32_t value = 0;
-    check_request(bs_protocol_write_receive(gc_string_to_cstr(src), gc_string_to_cstr(tag)));
-    if (bs_main_thread_wait_reply(&value, messaging_error, sizeof(messaging_error)) < 0)
-        runtime_error(messaging_error);
-    return value;
-}
 
 `
 
@@ -77,13 +51,115 @@ function print(message: any) {
 }
 
 // Messages between the projects in a workspace (see `bscript workspace run`).
+// The C side is in main/messaging.c.
 function sendInteger(dst: string, tag: string, value: integer) {
-    code`send_integer(${dst}, ${tag}, ${value});`
+    code`bs_messaging_send_integer(${dst}, ${tag}, ${value});`
+}
+
+function broadcastInteger(tag: string, value: integer) {
+    code`bs_messaging_broadcast_integer(${tag}, ${value});`
 }
 
 function receiveInteger(src: string, tag: string): integer {
     let value: integer = 0
-    code`${value} = receive_integer(${src}, ${tag});`
+    code`${value} = bs_messaging_receive_integer(${src}, ${tag});`
+    return value
+}
+
+function sendFloat(dst: string, tag: string, value: float) {
+    code`bs_messaging_send_float(${dst}, ${tag}, ${value});`
+}
+
+function broadcastFloat(tag: string, value: float) {
+    code`bs_messaging_broadcast_float(${tag}, ${value});`
+}
+
+function receiveFloat(src: string, tag: string): float {
+    let value: float = 0.0
+    code`${value} = bs_messaging_receive_float(${src}, ${tag});`
+    return value
+}
+
+function sendBoolean(dst: string, tag: string, value: boolean) {
+    code`bs_messaging_send_boolean(${dst}, ${tag}, ${value});`
+}
+
+function broadcastBoolean(tag: string, value: boolean) {
+    code`bs_messaging_broadcast_boolean(${tag}, ${value});`
+}
+
+function receiveBoolean(src: string, tag: string): boolean {
+    let value: boolean = false
+    code`${value} = bs_messaging_receive_boolean(${src}, ${tag});`
+    return value
+}
+
+function sendString(dst: string, tag: string, value: string) {
+    code`bs_messaging_send_string(${dst}, ${tag}, ${value});`
+}
+
+function broadcastString(tag: string, value: string) {
+    code`bs_messaging_broadcast_string(${tag}, ${value});`
+}
+
+function receiveString(src: string, tag: string): string {
+    let value: string = ""
+    code`${value} = bs_messaging_receive_string(${src}, ${tag});`
+    return value
+}
+
+function sendNull(dst: string, tag: string, value: null) {
+    code`bs_messaging_send_null(${dst}, ${tag});`
+}
+
+function broadcastNull(tag: string, value: null) {
+    code`bs_messaging_broadcast_null(${tag});`
+}
+
+function receiveNull(src: string, tag: string): null {
+    code`bs_messaging_receive_null(${src}, ${tag});`
+    return null
+}
+
+function sendIntegerArray(dst: string, tag: string, value: integer[]) {
+    code`bs_messaging_send_integer_array(${dst}, ${tag}, ${value});`
+}
+
+function broadcastIntegerArray(tag: string, value: integer[]) {
+    code`bs_messaging_broadcast_integer_array(${tag}, ${value});`
+}
+
+function receiveIntegerArray(src: string, tag: string): integer[] {
+    let value: integer[] = new Array<integer>(0, 0)
+    code`${value} = bs_messaging_receive_integer_array(${src}, ${tag});`
+    return value
+}
+
+function sendFloatArray(dst: string, tag: string, value: float[]) {
+    code`bs_messaging_send_float_array(${dst}, ${tag}, ${value});`
+}
+
+function broadcastFloatArray(tag: string, value: float[]) {
+    code`bs_messaging_broadcast_float_array(${tag}, ${value});`
+}
+
+function receiveFloatArray(src: string, tag: string): float[] {
+    let value: float[] = new Array<float>(0, 0.0)
+    code`${value} = bs_messaging_receive_float_array(${src}, ${tag});`
+    return value
+}
+
+function sendBooleanArray(dst: string, tag: string, value: boolean[]) {
+    code`bs_messaging_send_boolean_array(${dst}, ${tag}, ${value});`
+}
+
+function broadcastBooleanArray(tag: string, value: boolean[]) {
+    code`bs_messaging_broadcast_boolean_array(${tag}, ${value});`
+}
+
+function receiveBooleanArray(src: string, tag: string): boolean[] {
+    let value: boolean[] = new Array<boolean>(0, false)
+    code`${value} = bs_messaging_receive_boolean_array(${src}, ${tag});`
     return value
 }
 

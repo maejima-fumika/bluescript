@@ -4,7 +4,10 @@ import { DEFAULT_DEVICE_NAME } from "../../config/project-config";
 import { logger } from "../../core/logger";
 import { AsyncLock } from "../../core/async";
 import { Connection, ConnectionMessage, Service } from "../common";
-import { Protocol, ProtocolPacketBuilder, ProtocolParser } from "../protocol/device-protocol";
+import {
+    encodeMessageValue, maxCommandSize, Protocol, ProtocolPacketBuilder, ProtocolParser,
+} from "../protocol/device-protocol";
+import { MessageType, MessageValue } from "../protocol/message-value";
 import { BleTransport, createBleTransport } from "./transport";
 
 const MTU = 495;
@@ -21,8 +24,9 @@ export type DeviceServiceEvents = {
     profile: (fid: number, paramtypes: string[]) => void;
     exectime: (id: number, time: number) => void;
     memory: (layout: MemoryLayout) => void;
-    send: (dst: string, tag: string, value: number) => void;
-    receive: (src: string, tag: string) => void;
+    send: (dst: string, tag: string, message: MessageValue) => void;
+    receive: (src: string, tag: string, expected: MessageType) => void;
+    broadcast: (tag: string, message: MessageValue) => void;
 };
 
 export class DeviceService extends Service<DeviceServiceEvents, Buffer> {
@@ -75,12 +79,22 @@ export class DeviceService extends Service<DeviceServiceEvents, Buffer> {
         return p;
     }
 
-    /** Answers the program's pending `sendInteger` or `receiveInteger`. */
-    public async reply(value: number): Promise<void> {
-        await this.send("reply", new ProtocolPacketBuilder(MTU).reply(value).build());
+    /** Answers the program's pending send, broadcast or receive. */
+    public async reply(message: MessageValue): Promise<void> {
+        await this.send("reply", new ProtocolPacketBuilder(MTU).reply(message).build());
     }
 
-    /** Makes the program's pending `sendInteger` or `receiveInteger` throw. */
+    /** Whether a reply carrying `message` fits in one BLE write. */
+    public canReceive(message: MessageValue): boolean {
+        try {
+            // | cmd(1) | type(1) | value |
+            return 1 + encodeMessageValue(message).length <= maxCommandSize(MTU);
+        } catch {
+            return false;
+        }
+    }
+
+    /** Makes the program's pending send, broadcast or receive throw. */
     public async replyError(reason: string): Promise<void> {
         await this.send("replyError", new ProtocolPacketBuilder(MTU).replyError(reason).build());
     }
@@ -104,10 +118,13 @@ export class DeviceService extends Service<DeviceServiceEvents, Buffer> {
                 this.handleMessage("memory", [parseResult.layout]);
                 break;
             case Protocol.Send:
-                this.handleMessage("send", [parseResult.dst, parseResult.tag, parseResult.value]);
+                this.handleMessage("send", [parseResult.dst, parseResult.tag, parseResult.message]);
                 break;
             case Protocol.Receive:
-                this.handleMessage("receive", [parseResult.src, parseResult.tag]);
+                this.handleMessage("receive", [parseResult.src, parseResult.tag, parseResult.expected]);
+                break;
+            case Protocol.Broadcast:
+                this.handleMessage("broadcast", [parseResult.tag, parseResult.message]);
                 break;
         }
     }

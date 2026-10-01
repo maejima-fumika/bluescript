@@ -6,6 +6,7 @@ code`
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include "../../core/include/c-runtime.h"
 #include "./comm.h"
 #ifndef _WIN32
@@ -47,20 +48,173 @@ void print_message(value_t m) {
     }
 }
 
-static char messaging_error[256];
+// Messages between the projects in a workspace (see bscript workspace run).
+// A value travels as <type char><text> (see comm.h); these helpers convert it.
 
-void send_integer(value_t dst, value_t tag, int32_t value) {
-    if (bs_comm_send_integer(gc_string_to_cstr(dst), gc_string_to_cstr(tag), value,
-                             messaging_error, sizeof(messaging_error)) < 0)
+static char messaging_error[256];
+static char message_text[MAX_PAYLOAD_SIZE + 1];
+
+static void msg_check(int result) {
+    if (result < 0)
         runtime_error(messaging_error);
 }
 
-int32_t receive_integer(value_t src, value_t tag) {
-    int32_t value = 0;
-    if (bs_comm_receive_integer(gc_string_to_cstr(src), gc_string_to_cstr(tag), &value,
-                                messaging_error, sizeof(messaging_error)) < 0)
-        runtime_error(messaging_error);
-    return value;
+static void msg_too_large() {
+    runtime_error("the value is too large to send");
+}
+
+// Appends to message_text, or raises a runtime error when it is full.
+static int message_len;
+
+static void msg_begin(char type) {
+    message_text[0] = type;
+    message_text[1] = '\0';
+    message_len = 1;
+}
+
+static void msg_append(const char* format, ...) {
+    va_list list;
+    va_start(list, format);
+    int n = vsnprintf(message_text + message_len, sizeof(message_text) - message_len, format, list);
+    va_end(list);
+    if (n < 0 || message_len + n >= MAX_PAYLOAD_SIZE)
+        msg_too_large();
+    message_len += n;
+}
+
+static void msg_send(value_t dst, value_t tag) {
+    msg_check(bs_comm_send_message(gc_string_to_cstr(dst), gc_string_to_cstr(tag), message_text,
+                                   messaging_error, sizeof(messaging_error)));
+}
+
+static void msg_broadcast(value_t tag) {
+    msg_check(bs_comm_broadcast_message(gc_string_to_cstr(tag), message_text,
+                                        messaging_error, sizeof(messaging_error)));
+}
+
+// Returns the text of the received value (without the type char).
+static const char* msg_receive(value_t src, value_t tag, char type) {
+    msg_check(bs_comm_receive_message(gc_string_to_cstr(src), gc_string_to_cstr(tag), type, message_text,
+                                      messaging_error, sizeof(messaging_error)));
+    return message_text;
+}
+
+// Builds message_text for each type.
+
+static void msg_format_integer(int32_t value) {
+    msg_begin(MSG_TYPE_INTEGER);
+    msg_append("%d", (int)value);
+}
+
+static void msg_format_float(float value) {
+    msg_begin(MSG_TYPE_FLOAT);
+    msg_append("%.9g", value);
+}
+
+static void msg_format_boolean(int32_t value) {
+    msg_begin(MSG_TYPE_BOOLEAN);
+    msg_append("%d", value ? 1 : 0);
+}
+
+static void msg_format_string(value_t value) {
+    msg_begin(MSG_TYPE_STRING);
+    for (const unsigned char* p = (const unsigned char*)gc_string_to_cstr(value); *p != '\0'; p++)
+        msg_append("%02x", *p);
+}
+
+static void msg_format_null() {
+    msg_begin(MSG_TYPE_NULL);
+}
+
+static void msg_format_integer_array(value_t value) {
+    msg_begin(MSG_TYPE_INTEGER_ARRAY);
+    int32_t n = gc_intarray_length(value);
+    for (int32_t i = 0; i < n; i++)
+        msg_append(i == 0 ? "%d" : ",%d", (int)*gc_intarray_get(value, i));
+}
+
+static void msg_format_float_array(value_t value) {
+    msg_begin(MSG_TYPE_FLOAT_ARRAY);
+    int32_t n = gc_floatarray_length(value);
+    for (int32_t i = 0; i < n; i++)
+        msg_append(i == 0 ? "%.9g" : ",%.9g", *gc_floatarray_get(value, i));
+}
+
+static void msg_format_boolean_array(value_t value) {
+    msg_begin(MSG_TYPE_BOOLEAN_ARRAY);
+    int32_t n = gc_bytearray_length(value);
+    for (int32_t i = 0; i < n; i++)
+        msg_append("%d", *gc_bytearray_get(value, i) ? 1 : 0);
+}
+
+// Converts the received text into a value of each type.
+
+static int32_t msg_parse_integer(const char* text) {
+    return (int32_t)strtol(text, NULL, 10);
+}
+
+static float msg_parse_float(const char* text) {
+    return strtof(text, NULL);
+}
+
+static int32_t msg_parse_boolean(const char* text) {
+    return text[0] == '1';
+}
+
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+static value_t msg_parse_string(const char* text) {
+    static char bytes[MAX_PAYLOAD_SIZE / 2 + 1];
+    int32_t len = (int32_t)strlen(text) / 2;
+    for (int32_t i = 0; i < len; i++)
+        bytes[i] = (char)(hex_digit(text[2 * i]) * 16 + hex_digit(text[2 * i + 1]));
+    return gc_new_string_copy(bytes, len);
+}
+
+// The number of elements in a comma-separated list.
+static int32_t msg_count_list(const char* text) {
+    if (text[0] == '\0')
+        return 0;
+    int32_t n = 1;
+    for (const char* p = text; *p != '\0'; p++)
+        if (*p == ',')
+            n++;
+    return n;
+}
+
+static value_t msg_parse_integer_array(const char* text) {
+    int32_t n = msg_count_list(text);
+    value_t array = gc_new_intarray(n, 0);
+    char* p = (char*)text;
+    for (int32_t i = 0; i < n; i++) {
+        *gc_intarray_get(array, i) = (int32_t)strtol(p, &p, 10);
+        if (*p == ',') p++;
+    }
+    return array;
+}
+
+static value_t msg_parse_float_array(const char* text) {
+    int32_t n = msg_count_list(text);
+    value_t array = gc_new_floatarray(n, 0.0f);
+    char* p = (char*)text;
+    for (int32_t i = 0; i < n; i++) {
+        *gc_floatarray_get(array, i) = strtof(p, &p);
+        if (*p == ',') p++;
+    }
+    return array;
+}
+
+static value_t msg_parse_boolean_array(const char* text) {
+    int32_t n = (int32_t)strlen(text);
+    value_t array = gc_new_bytearray(true, n, 0);
+    for (int32_t i = 0; i < n; i++)
+        *gc_bytearray_get(array, i) = text[i] == '1';
+    return array;
 }
 
 static float get_time_ms() {
@@ -92,12 +246,113 @@ function print(message: any) {
 
 // Messages between the projects in a workspace (see `bscript workspace run`).
 function sendInteger(dst: string, tag: string, value: integer) {
-    code`send_integer(${dst}, ${tag}, ${value});`
+    code`msg_format_integer(${value}); msg_send(${dst}, ${tag});`
+}
+
+function broadcastInteger(tag: string, value: integer) {
+    code`msg_format_integer(${value}); msg_broadcast(${tag});`
 }
 
 function receiveInteger(src: string, tag: string): integer {
     let value: integer = 0
-    code`${value} = receive_integer(${src}, ${tag});`
+    code`${value} = msg_parse_integer(msg_receive(${src}, ${tag}, MSG_TYPE_INTEGER));`
+    return value
+}
+
+function sendFloat(dst: string, tag: string, value: float) {
+    code`msg_format_float(${value}); msg_send(${dst}, ${tag});`
+}
+
+function broadcastFloat(tag: string, value: float) {
+    code`msg_format_float(${value}); msg_broadcast(${tag});`
+}
+
+function receiveFloat(src: string, tag: string): float {
+    let value: float = 0.0
+    code`${value} = msg_parse_float(msg_receive(${src}, ${tag}, MSG_TYPE_FLOAT));`
+    return value
+}
+
+function sendBoolean(dst: string, tag: string, value: boolean) {
+    code`msg_format_boolean(${value}); msg_send(${dst}, ${tag});`
+}
+
+function broadcastBoolean(tag: string, value: boolean) {
+    code`msg_format_boolean(${value}); msg_broadcast(${tag});`
+}
+
+function receiveBoolean(src: string, tag: string): boolean {
+    let value: boolean = false
+    code`${value} = msg_parse_boolean(msg_receive(${src}, ${tag}, MSG_TYPE_BOOLEAN));`
+    return value
+}
+
+function sendString(dst: string, tag: string, value: string) {
+    code`msg_format_string(${value}); msg_send(${dst}, ${tag});`
+}
+
+function broadcastString(tag: string, value: string) {
+    code`msg_format_string(${value}); msg_broadcast(${tag});`
+}
+
+function receiveString(src: string, tag: string): string {
+    let value: string = ""
+    code`${value} = msg_parse_string(msg_receive(${src}, ${tag}, MSG_TYPE_STRING));`
+    return value
+}
+
+function sendNull(dst: string, tag: string, value: null) {
+    code`msg_format_null(); msg_send(${dst}, ${tag});`
+}
+
+function broadcastNull(tag: string, value: null) {
+    code`msg_format_null(); msg_broadcast(${tag});`
+}
+
+function receiveNull(src: string, tag: string): null {
+    code`msg_receive(${src}, ${tag}, MSG_TYPE_NULL);`
+    return null
+}
+
+function sendIntegerArray(dst: string, tag: string, value: integer[]) {
+    code`msg_format_integer_array(${value}); msg_send(${dst}, ${tag});`
+}
+
+function broadcastIntegerArray(tag: string, value: integer[]) {
+    code`msg_format_integer_array(${value}); msg_broadcast(${tag});`
+}
+
+function receiveIntegerArray(src: string, tag: string): integer[] {
+    let value: integer[] = new Array<integer>(0, 0)
+    code`${value} = msg_parse_integer_array(msg_receive(${src}, ${tag}, MSG_TYPE_INTEGER_ARRAY));`
+    return value
+}
+
+function sendFloatArray(dst: string, tag: string, value: float[]) {
+    code`msg_format_float_array(${value}); msg_send(${dst}, ${tag});`
+}
+
+function broadcastFloatArray(tag: string, value: float[]) {
+    code`msg_format_float_array(${value}); msg_broadcast(${tag});`
+}
+
+function receiveFloatArray(src: string, tag: string): float[] {
+    let value: float[] = new Array<float>(0, 0.0)
+    code`${value} = msg_parse_float_array(msg_receive(${src}, ${tag}, MSG_TYPE_FLOAT_ARRAY));`
+    return value
+}
+
+function sendBooleanArray(dst: string, tag: string, value: boolean[]) {
+    code`msg_format_boolean_array(${value}); msg_send(${dst}, ${tag});`
+}
+
+function broadcastBooleanArray(tag: string, value: boolean[]) {
+    code`msg_format_boolean_array(${value}); msg_broadcast(${tag});`
+}
+
+function receiveBooleanArray(src: string, tag: string): boolean[] {
+    let value: boolean[] = new Array<boolean>(0, false)
+    code`${value} = msg_parse_boolean_array(msg_receive(${src}, ${tag}, MSG_TYPE_BOOLEAN_ARRAY));`
     return value
 }
 

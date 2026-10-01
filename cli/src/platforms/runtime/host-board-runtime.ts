@@ -5,7 +5,7 @@ import { BoardRuntime } from "./board-runtime";
 import { CompileContext } from "../compiler/compiler-adapter";
 import { HostBoardConfig } from "../../config/global-config";
 import { HostService, ProcessConnection } from '../../services/process';
-import { answerReceive, answerSend, MessagePort, MessageReplier, NO_WORKSPACE_PORT } from "../messaging";
+import { answerBroadcast, answerReceive, answerSend, MessagePort, MessageReplier, MessageValue, NO_WORKSPACE_PORT } from "../messaging";
 
 
 export class HostBoardRuntime implements BoardRuntime<SharedLibrary> {
@@ -14,7 +14,7 @@ export class HostBoardRuntime implements BoardRuntime<SharedLibrary> {
     private hostService: HostService;
     private messagePort: MessagePort = NO_WORKSPACE_PORT;
     private readonly replier: MessageReplier = {
-        reply: (value) => this.hostService.reply(value),
+        reply: (message) => this.hostService.reply(message),
         replyError: (error) => this.hostService.replyError(error.message),
     };
 
@@ -41,11 +41,14 @@ export class HostBoardRuntime implements BoardRuntime<SharedLibrary> {
         this.hostService.on('error', (message) => {
             this.programOutput.writeError(message);
         });
-        this.hostService.on('send', (dst, tag, value) => {
-            void answerSend(this.messagePort, this.replier, dst, tag, value);
+        this.hostService.on('send', (dst, tag, message) => {
+            void answerSend(this.messagePort, this.replier, dst, tag, message);
         });
-        this.hostService.on('receive', (src, tag) => {
-            void answerReceive(this.messagePort, this.replier, src, tag);
+        this.hostService.on('receive', (src, tag, expected) => {
+            void answerReceive(this.messagePort, this.replier, src, tag, expected);
+        });
+        this.hostService.on('broadcast', (tag, message) => {
+            void answerBroadcast(this.messagePort, this.replier, tag, message);
         });
     }
 
@@ -75,6 +78,10 @@ export class HostBoardRuntime implements BoardRuntime<SharedLibrary> {
 
     setMessagePort(port: MessagePort): void {
         this.messagePort = port;
+    }
+
+    canReceiveMessage(message: MessageValue): boolean {
+        return this.hostService.canReceive(message);
     }
 
     private getShellPath(): string {

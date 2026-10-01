@@ -1019,6 +1019,18 @@ static pointer_t make_string_object(int32_t len) {
     return obj;
 }
 
+// Makes a String object holding a copy of the first `len` bytes of `bytes`.
+// Unlike gc_new_string, `bytes` may be freed afterwards.
+value_t gc_new_string_copy(const char* bytes, int32_t len) {
+    if (len < 0)
+        len = 0;
+    pointer_t obj = make_string_object(len);
+    char* p = (char*)&obj->body[1];
+    memcpy(p, bytes, len);
+    p[len] = '\0';
+    return ptr_to_value(obj);
+}
+
 value_t gc_new_String(value_t s1, value_t s2) {
     ROOT_SET(rootset, 2)
     rootset.values[0] = s1;

@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { MemoryLayout } from "@bscript/lang";
+import { MessageType, MessageValue } from "./message-value";
 
 
 export enum Protocol {
@@ -19,11 +20,89 @@ export enum Protocol {
     Receive,
     Reply,
     ReplyError,
+    Broadcast,
 }
 
-/** The type of a value carried by the messaging commands. */
+/** The type code of a value carried by the messaging commands. Must match messaging.h on ESP32. */
 export enum MessageValueType {
     Integer = 0,
+    Float = 1,
+    Boolean = 2,
+    String = 3,
+    Null = 4,
+    IntegerArray = 5,
+    FloatArray = 6,
+    BooleanArray = 7,
+}
+
+const TYPE_CODES: Record<MessageType, MessageValueType> = {
+    'integer': MessageValueType.Integer,
+    'float': MessageValueType.Float,
+    'boolean': MessageValueType.Boolean,
+    'string': MessageValueType.String,
+    'null': MessageValueType.Null,
+    'integer[]': MessageValueType.IntegerArray,
+    'float[]': MessageValueType.FloatArray,
+    'boolean[]': MessageValueType.BooleanArray,
+};
+
+const TYPE_NAMES = Object.fromEntries(
+    Object.entries(TYPE_CODES).map(([name, code]) => [code, name]),
+) as Record<MessageValueType, MessageType>;
+
+const MAX_ELEMENT_COUNT = 0xffff;   // count(2)
+
+/**
+ * | type(1) | value |
+ * Fixed-size values are written as is (int32, float32, u8, or nothing for null).
+ * Variable-size values are | count(2) | elements |: bytes for a string, u8 for boolean[],
+ * int32 / float32 for integer[] / float[]. Everything is little-endian.
+ */
+export function encodeMessageValue(message: MessageValue): Buffer {
+    const type = Buffer.from([TYPE_CODES[message.type]]);
+    switch (message.type) {
+        case 'integer': {
+            const b = Buffer.allocUnsafe(4);
+            b.writeInt32LE(message.value, 0);
+            return Buffer.concat([type, b]);
+        }
+        case 'float': {
+            const b = Buffer.allocUnsafe(4);
+            b.writeFloatLE(message.value, 0);
+            return Buffer.concat([type, b]);
+        }
+        case 'boolean':
+            return Buffer.concat([type, Buffer.from([message.value ? 1 : 0])]);
+        case 'null':
+            return type;
+        case 'string':
+            return Buffer.concat([type, encodeCount(message.value.length), message.value]);
+        case 'integer[]':
+        case 'float[]': {
+            const b = Buffer.allocUnsafe(4 * message.value.length);
+            message.value.forEach((v, i) => {
+                if (message.type === 'integer[]') {
+                    b.writeInt32LE(v, 4 * i);
+                } else {
+                    b.writeFloatLE(v, 4 * i);
+                }
+            });
+            return Buffer.concat([type, encodeCount(message.value.length), b]);
+        }
+        case 'boolean[]':
+            return Buffer.concat([
+                type, encodeCount(message.value.length), Buffer.from(message.value.map((v) => (v ? 1 : 0))),
+            ]);
+    }
+}
+
+function encodeCount(count: number): Buffer {
+    if (count > MAX_ELEMENT_COUNT) {
+        throw new Error(`A message cannot carry more than ${MAX_ELEMENT_COUNT} elements.`);
+    }
+    const b = Buffer.allocUnsafe(2);
+    b.writeUInt16LE(count, 0);
+    return b;
 }
 
 
@@ -35,11 +114,15 @@ const FIRST_HEADER = Buffer.from([0x03, 0x00]);
 const LOAD_HEADER_SIZE = 9;   // cmd(1) + address(4) + size(4)
 const JUMP_HEADER_SIZE = 9;   // cmd(1) + id(4) + address(4)
 const RESET_HEADER_SIZE = 1;  // cmd(1)
-const REPLY_SIZE = 6;         // cmd(1) + type(1) + value(4)
 // The device keeps the reason in a 64-byte buffer (REPLY_ERROR_SIZE in main-thread.c).
 const REPLY_ERROR_MAX_LENGTH = 63;
 
 const ALIGNMENT = 4;
+
+/** The largest command that fits in one unit (BLE write) of `unitSize` bytes. */
+export function maxCommandSize(unitSize: number): number {
+    return unitSize - FIRST_HEADER_SIZE;
+}
 
 export class ProtocolPacketBuilder {
     private readonly unitSize: number;
@@ -150,13 +233,10 @@ export class ProtocolPacketBuilder {
         return this.appendCommand(header);
     }
 
-    /** Answers a Send or Receive request from the device. */
-    public reply(value: number) {
-        const command = Buffer.allocUnsafe(REPLY_SIZE);
-        command.writeUInt8(Protocol.Reply, 0);                 // cmd(1)
-        command.writeUInt8(MessageValueType.Integer, 1);       // type(1)
-        command.writeInt32LE(value, 2);                        // value(4)
-        return this.appendCommand(command);
+    /** Answers a Send, Broadcast or Receive request from the device. */
+    public reply(message: MessageValue) {
+        // | cmd(1) | type(1) | value |
+        return this.appendCommand(Buffer.concat([Buffer.from([Protocol.Reply]), encodeMessageValue(message)]));
     }
 
     /** Makes a pending Send or Receive request on the device throw `reason`. */
@@ -202,10 +282,11 @@ type ProtocolPayloads = {
     [Protocol.Memory]: { layout: MemoryLayout };
     [Protocol.Exectime]: { id: number; time: number };
     [Protocol.Profile]: { fid: number; paramtypes: string[] };
-    [Protocol.Send]: { dst: string; tag: string; value: number };
-    [Protocol.Receive]: { src: string; tag: string };
+    [Protocol.Send]: { dst: string; tag: string; message: MessageValue };
+    [Protocol.Receive]: { src: string; tag: string; expected: MessageType };
     [Protocol.Reply]: {};
     [Protocol.ReplyError]: {};
+    [Protocol.Broadcast]: { tag: string; message: MessageValue };
 }
 
 export type ParseResult<T extends Protocol = Protocol> = {
@@ -226,6 +307,7 @@ export class ProtocolParser {
             [Protocol.Profile]: ProtocolParser.parseProfile,
             [Protocol.Send]: ProtocolParser.parseSend,
             [Protocol.Receive]: ProtocolParser.parseReceive,
+            [Protocol.Broadcast]: ProtocolParser.parseBroadcast,
         }
     }
 
@@ -286,23 +368,36 @@ export class ProtocolParser {
         return { fid, paramtypes: paramStr ? paramStr.split(", ") : [] };
     }
 
-    // | dstLen(1) | dst | tagLen(1) | tag | type(1) | value(4) |
-    static parseSend(buffer: Buffer, offset: number): {dst: string, tag: string, value: number} {
+    // | dstLen(1) | dst | tagLen(1) | tag | type(1) | value |
+    static parseSend(buffer: Buffer, offset: number): {dst: string, tag: string, message: MessageValue} {
         const reader = new MessageReader(buffer, offset);
         const dst = reader.readName();
         const tag = reader.readName();
-        const value = reader.readValue();
-        return { dst, tag, value };
+        const message = reader.readValue();
+        return { dst, tag, message };
     }
 
-    // | srcLen(1) | src | tagLen(1) | tag | type(1) |
-    static parseReceive(buffer: Buffer, offset: number): {src: string, tag: string} {
+    // | tagLen(1) | tag | type(1) | value |
+    static parseBroadcast(buffer: Buffer, offset: number): {tag: string, message: MessageValue} {
+        const reader = new MessageReader(buffer, offset);
+        const tag = reader.readName();
+        const message = reader.readValue();
+        return { tag, message };
+    }
+
+    // | srcLen(1) | src | tagLen(1) | tag | type(1) |, where type is the type the program expects.
+    static parseReceive(buffer: Buffer, offset: number): {src: string, tag: string, expected: MessageType} {
         const reader = new MessageReader(buffer, offset);
         const src = reader.readName();
         const tag = reader.readName();
-        reader.readValueType();
-        return { src, tag };
+        const expected = reader.readValueType();
+        return { src, tag, expected };
     }
+}
+
+/** Reads the value written by {@link encodeMessageValue}. */
+export function decodeMessageValue(buffer: Buffer, offset = 0): MessageValue {
+    return new MessageReader(buffer, offset).readValue();
 }
 
 class MessageReader {
@@ -319,17 +414,56 @@ class MessageReader {
         return name;
     }
 
-    readValueType(): MessageValueType {
-        const type = this.buffer.readUInt8(this.offset); this.offset += 1;
-        if (type !== MessageValueType.Integer) {
-            throw new Error(`Failed to parse message. Unknown value type ${type}.`);
+    readValueType(): MessageType {
+        const code = this.buffer.readUInt8(this.offset); this.offset += 1;
+        const type = TYPE_NAMES[code as MessageValueType];
+        if (type === undefined) {
+            throw new Error(`Failed to parse message. Unknown value type ${code}.`);
         }
         return type;
     }
 
-    readValue(): number {
-        this.readValueType();
-        const value = this.buffer.readInt32LE(this.offset); this.offset += 4;
-        return value;
+    readValue(): MessageValue {
+        const type = this.readValueType();
+        switch (type) {
+            case 'integer':
+                return { type, value: this.read(4).readInt32LE(0) };
+            case 'float':
+                return { type, value: this.read(4).readFloatLE(0) };
+            case 'boolean':
+                return { type, value: this.read(1)[0] !== 0 };
+            case 'null':
+                return { type };
+            case 'string': {
+                const count = this.readCount();
+                return { type, value: Buffer.from(this.read(count)) };
+            }
+            case 'integer[]':
+            case 'float[]': {
+                const count = this.readCount();
+                const bytes = this.read(4 * count);
+                const value = Array.from({ length: count }, (_, i) =>
+                    type === 'integer[]' ? bytes.readInt32LE(4 * i) : bytes.readFloatLE(4 * i));
+                return { type, value };
+            }
+            case 'boolean[]': {
+                const count = this.readCount();
+                return { type, value: [...this.read(count)].map((b) => b !== 0) };
+            }
+        }
+    }
+
+    private readCount(): number {
+        return this.read(2).readUInt16LE(0);
+    }
+
+    private read(size: number): Buffer {
+        const end = this.offset + size;
+        if (end > this.buffer.length) {
+            throw new Error('Failed to parse message. The value is truncated.');
+        }
+        const bytes = this.buffer.subarray(this.offset, end);
+        this.offset = end;
+        return bytes;
     }
 }

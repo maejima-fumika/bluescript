@@ -1,8 +1,10 @@
 import { logger } from "../core/logger";
 import { Connection, ConnectionMessage, Service } from "./common";
 import {
-    hostProtocolBuilder, hostReplyBuilder, hostReplyErrorBuilder, HostProtocolParser, HostProtocol, HostParseResult,
+    HOST_MAX_PAYLOAD_SIZE, hostProtocolBuilder, hostReplyBuilder, hostReplyErrorBuilder, hostValueSize,
+    HostProtocolParser, HostProtocol, HostParseResult,
 } from "./protocol/host-protocol";
+import { MessageType, MessageValue } from "./protocol/message-value";
 import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 
 
@@ -11,8 +13,9 @@ export type HostServiceEvents = {
     error: (message: string) => void;
     exectime: (time: number) => void;
     loadtime: (time: number) => void;
-    send: (dst: string, tag: string, value: number) => void;
-    receive: (src: string, tag: string) => void;
+    send: (dst: string, tag: string, message: MessageValue) => void;
+    receive: (src: string, tag: string, expected: MessageType) => void;
+    broadcast: (tag: string, message: MessageValue) => void;
 }
 
 export class HostService extends Service<HostServiceEvents, string> {
@@ -54,12 +57,17 @@ export class HostService extends Service<HostServiceEvents, string> {
         });
     }
 
-    /** Answers the program's pending `sendInteger` or `receiveInteger`. */
-    public async reply(value: number): Promise<void> {
-        await this.send('reply', [hostReplyBuilder(value)]);
+    /** Answers the program's pending send, broadcast or receive. */
+    public async reply(message: MessageValue): Promise<void> {
+        await this.send('reply', [hostReplyBuilder(message)]);
     }
 
-    /** Makes the program's pending `sendInteger` or `receiveInteger` throw. */
+    /** Whether a reply carrying `message` fits in the shell's line buffer. */
+    public canReceive(message: MessageValue): boolean {
+        return hostValueSize(message) <= HOST_MAX_PAYLOAD_SIZE;
+    }
+
+    /** Makes the program's pending send, broadcast or receive throw. */
     public async replyError(reason: string): Promise<void> {
         await this.send('replyError', [hostReplyErrorBuilder(reason)]);
     }
@@ -106,10 +114,13 @@ class HostMessageQueue {
                     this.service.handleMessage('loadtime', [message.time]);
                     break;
                 case HostProtocol.Send:
-                    this.service.handleMessage('send', [message.dst, message.tag, message.value]);
+                    this.service.handleMessage('send', [message.dst, message.tag, message.message]);
                     break;
                 case HostProtocol.Receive:
-                    this.service.handleMessage('receive', [message.src, message.tag]);
+                    this.service.handleMessage('receive', [message.src, message.tag, message.expected]);
+                    break;
+                case HostProtocol.Broadcast:
+                    this.service.handleMessage('broadcast', [message.tag, message.message]);
                     break;
                 default:
                     throw new Error("Unexpected error.");
@@ -149,7 +160,8 @@ export class ProcessConnection extends Connection<String> {
             }
         });
 
-        this.shellProcess.stdout.setEncoding('utf8');
+        // One char per byte: the protocol's lengths count bytes (see HostProtocolParser.parse).
+        this.shellProcess.stdout.setEncoding('latin1');
         this.shellProcess.stderr.setEncoding('utf8');
         this.shellProcess.stdout.on('data', (message) => {
             this.emit('receiveData', message);

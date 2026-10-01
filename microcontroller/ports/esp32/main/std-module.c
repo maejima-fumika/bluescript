@@ -5,7 +5,7 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "protocol.h"
-#include "main-thread.h"
+#include "./include/messaging.h"
 #include "c-runtime.h"
 #include "./include/std-module.h"
 
@@ -38,33 +38,6 @@ void write_message_to_buff(value_t message) {
         snprintf(buff, sizeof(buff), "<class %s>\n", cls->name);
     }
     printf(buff);
-}
-
-static char messaging_error[64];
-
-static void check_request(int result) {
-    if (result == BS_PROTOCOL_ERR_NAME_TOO_LONG)
-        runtime_error("name too long");
-    else if (result == BS_PROTOCOL_ERR_TOO_LARGE)
-        runtime_error("request too long");
-    else if (result == BS_PROTOCOL_ERR_NO_MEMORY)
-        runtime_error("out of memory");
-    else if (result == BS_PROTOCOL_ERR_SEND_FAILED)
-        runtime_error("send failed");
-}
-
-void send_integer(value_t dst, value_t tag, int32_t value) {
-    check_request(bs_protocol_write_send(gc_string_to_cstr(dst), gc_string_to_cstr(tag), value));
-    if (bs_main_thread_wait_reply(NULL, messaging_error, sizeof(messaging_error)) < 0)
-        runtime_error(messaging_error);
-}
-
-int32_t receive_integer(value_t src, value_t tag) {
-    int32_t value = 0;
-    check_request(bs_protocol_write_receive(gc_string_to_cstr(src), gc_string_to_cstr(tag)));
-    if (bs_main_thread_wait_reply(&value, messaging_error, sizeof(messaging_error)) < 0)
-        runtime_error(messaging_error);
-    return value;
 }
 
 void PORT_TEXT_SECTION mth_0_Console(value_t self, value_t _message);
@@ -108,11 +81,22 @@ static void fbody_sendInteger(value_t self, value_t _dst, value_t _tag, int32_t 
   func_rootset.values[0] = _dst;
   func_rootset.values[1] = _tag;
   {
-    send_integer(func_rootset.values[0], func_rootset.values[1], _value);;
+    bs_messaging_send_integer(func_rootset.values[0], func_rootset.values[1], _value);;
   }
   DELETE_ROOT_SET(func_rootset)
 }
 PORT_DATA_SECTION const struct func_body _sendInteger = { fbody_sendInteger, "(ssi)v" };
+
+static void fbody_broadcastInteger(value_t self, value_t _tag, int32_t _value) {
+  ROOT_SET_N(func_rootset,2,VALUE_UNDEF_2)
+  func_rootset.values[1] = self;
+  func_rootset.values[0] = _tag;
+  {
+    bs_messaging_broadcast_integer(func_rootset.values[0], _value);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _broadcastInteger = { fbody_broadcastInteger, "(si)v" };
 
 static int32_t fbody_receiveInteger(value_t self, value_t _src, value_t _tag) {
   ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
@@ -121,11 +105,272 @@ static int32_t fbody_receiveInteger(value_t self, value_t _src, value_t _tag) {
   func_rootset.values[1] = _tag;
   {
     int32_t _value = 0;
-    _value = receive_integer(func_rootset.values[0], func_rootset.values[1]);;
+    _value = bs_messaging_receive_integer(func_rootset.values[0], func_rootset.values[1]);;
     { int32_t ret_value_ = (_value); DELETE_ROOT_SET(func_rootset); return ret_value_; }
   }
 }
 PORT_DATA_SECTION const struct func_body _receiveInteger = { fbody_receiveInteger, "(ss)i" };
+
+static void fbody_sendFloat(value_t self, value_t _dst, value_t _tag, float _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  {
+    bs_messaging_send_float(func_rootset.values[0], func_rootset.values[1], _value);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _sendFloat = { fbody_sendFloat, "(ssf)v" };
+
+static void fbody_broadcastFloat(value_t self, value_t _tag, float _value) {
+  ROOT_SET_N(func_rootset,2,VALUE_UNDEF_2)
+  func_rootset.values[1] = self;
+  func_rootset.values[0] = _tag;
+  {
+    bs_messaging_broadcast_float(func_rootset.values[0], _value);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _broadcastFloat = { fbody_broadcastFloat, "(sf)v" };
+
+static float fbody_receiveFloat(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    float _value = 0.0;
+    _value = bs_messaging_receive_float(func_rootset.values[0], func_rootset.values[1]);;
+    { float ret_value_ = (_value); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+PORT_DATA_SECTION const struct func_body _receiveFloat = { fbody_receiveFloat, "(ss)f" };
+
+static void fbody_sendBoolean(value_t self, value_t _dst, value_t _tag, int32_t _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  {
+    bs_messaging_send_boolean(func_rootset.values[0], func_rootset.values[1], _value);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _sendBoolean = { fbody_sendBoolean, "(ssb)v" };
+
+static void fbody_broadcastBoolean(value_t self, value_t _tag, int32_t _value) {
+  ROOT_SET_N(func_rootset,2,VALUE_UNDEF_2)
+  func_rootset.values[1] = self;
+  func_rootset.values[0] = _tag;
+  {
+    bs_messaging_broadcast_boolean(func_rootset.values[0], _value);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _broadcastBoolean = { fbody_broadcastBoolean, "(sb)v" };
+
+static int32_t fbody_receiveBoolean(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    int32_t _value = 0;
+    _value = bs_messaging_receive_boolean(func_rootset.values[0], func_rootset.values[1]);;
+    { int32_t ret_value_ = (_value); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+PORT_DATA_SECTION const struct func_body _receiveBoolean = { fbody_receiveBoolean, "(ss)b" };
+
+static void fbody_sendString(value_t self, value_t _dst, value_t _tag, value_t _value) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[3] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  func_rootset.values[2] = _value;
+  {
+    bs_messaging_send_string(func_rootset.values[0], func_rootset.values[1], func_rootset.values[2]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _sendString = { fbody_sendString, "(sss)v" };
+
+static void fbody_broadcastString(value_t self, value_t _tag, value_t _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _tag;
+  func_rootset.values[1] = _value;
+  {
+    bs_messaging_broadcast_string(func_rootset.values[0], func_rootset.values[1]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _broadcastString = { fbody_broadcastString, "(ss)v" };
+
+static value_t fbody_receiveString(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    func_rootset.values[3] = gc_new_string("");
+    func_rootset.values[3] = bs_messaging_receive_string(func_rootset.values[0], func_rootset.values[1]);;
+    { value_t ret_value_ = (func_rootset.values[3]); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+PORT_DATA_SECTION const struct func_body _receiveString = { fbody_receiveString, "(ss)s" };
+
+static void fbody_sendNull(value_t self, value_t _dst, value_t _tag, value_t _value) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[3] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  func_rootset.values[2] = _value;
+  {
+    bs_messaging_send_null(func_rootset.values[0], func_rootset.values[1]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _sendNull = { fbody_sendNull, "(ssn)v" };
+
+static void fbody_broadcastNull(value_t self, value_t _tag, value_t _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _tag;
+  func_rootset.values[1] = _value;
+  {
+    bs_messaging_broadcast_null(func_rootset.values[0]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _broadcastNull = { fbody_broadcastNull, "(sn)v" };
+
+static value_t fbody_receiveNull(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    bs_messaging_receive_null(func_rootset.values[0], func_rootset.values[1]);;
+    { value_t ret_value_ = (VALUE_NULL); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+PORT_DATA_SECTION const struct func_body _receiveNull = { fbody_receiveNull, "(ss)n" };
+
+static void fbody_sendIntegerArray(value_t self, value_t _dst, value_t _tag, value_t _value) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[3] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  func_rootset.values[2] = _value;
+  {
+    bs_messaging_send_integer_array(func_rootset.values[0], func_rootset.values[1], func_rootset.values[2]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _sendIntegerArray = { fbody_sendIntegerArray, "(ss[i)v" };
+
+static void fbody_broadcastIntegerArray(value_t self, value_t _tag, value_t _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _tag;
+  func_rootset.values[1] = _value;
+  {
+    bs_messaging_broadcast_integer_array(func_rootset.values[0], func_rootset.values[1]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _broadcastIntegerArray = { fbody_broadcastIntegerArray, "(s[i)v" };
+
+static value_t fbody_receiveIntegerArray(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    func_rootset.values[3] = gc_new_intarray(0, 0);
+    func_rootset.values[3] = bs_messaging_receive_integer_array(func_rootset.values[0], func_rootset.values[1]);;
+    { value_t ret_value_ = (func_rootset.values[3]); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+PORT_DATA_SECTION const struct func_body _receiveIntegerArray = { fbody_receiveIntegerArray, "(ss)[i" };
+
+static void fbody_sendFloatArray(value_t self, value_t _dst, value_t _tag, value_t _value) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[3] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  func_rootset.values[2] = _value;
+  {
+    bs_messaging_send_float_array(func_rootset.values[0], func_rootset.values[1], func_rootset.values[2]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _sendFloatArray = { fbody_sendFloatArray, "(ss[f)v" };
+
+static void fbody_broadcastFloatArray(value_t self, value_t _tag, value_t _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _tag;
+  func_rootset.values[1] = _value;
+  {
+    bs_messaging_broadcast_float_array(func_rootset.values[0], func_rootset.values[1]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _broadcastFloatArray = { fbody_broadcastFloatArray, "(s[f)v" };
+
+static value_t fbody_receiveFloatArray(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    func_rootset.values[3] = gc_new_floatarray(0, 0.0);
+    func_rootset.values[3] = bs_messaging_receive_float_array(func_rootset.values[0], func_rootset.values[1]);;
+    { value_t ret_value_ = (func_rootset.values[3]); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+PORT_DATA_SECTION const struct func_body _receiveFloatArray = { fbody_receiveFloatArray, "(ss)[f" };
+
+static void fbody_sendBooleanArray(value_t self, value_t _dst, value_t _tag, value_t _value) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[3] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  func_rootset.values[2] = _value;
+  {
+    bs_messaging_send_boolean_array(func_rootset.values[0], func_rootset.values[1], func_rootset.values[2]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _sendBooleanArray = { fbody_sendBooleanArray, "(ss[b)v" };
+
+static void fbody_broadcastBooleanArray(value_t self, value_t _tag, value_t _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _tag;
+  func_rootset.values[1] = _value;
+  {
+    bs_messaging_broadcast_boolean_array(func_rootset.values[0], func_rootset.values[1]);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+PORT_DATA_SECTION const struct func_body _broadcastBooleanArray = { fbody_broadcastBooleanArray, "(s[b)v" };
+
+static value_t fbody_receiveBooleanArray(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET(func_rootset,4)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    func_rootset.values[3] = gc_new_bytearray(true, 0, 0);
+    func_rootset.values[3] = bs_messaging_receive_boolean_array(func_rootset.values[0], func_rootset.values[1]);;
+    { value_t ret_value_ = (func_rootset.values[3]); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+PORT_DATA_SECTION const struct func_body _receiveBooleanArray = { fbody_receiveBooleanArray, "(ss)[b" };
 
 
 void mth_0_Console(value_t self, value_t _message) {

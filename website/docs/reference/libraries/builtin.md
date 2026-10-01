@@ -24,54 +24,60 @@ print("Hello, World!");
 // Output: Hello, World!
 ```
 
-### `sendInteger(dst: string, tag: string, value: integer): void`
+## Messages Between Projects
 
-Sends an integer to another project in the same workspace. Available only when the program is started by [`bscript workspace run`](../cli.md#bscript-workspace-run).
+When programs are started by [`bscript workspace run`](../cli.md#bscript-workspace-run), they can send values to each other. The programs never talk directly: every message goes through the CLI, which keeps it until the receiver asks for it.
 
-The message goes through the CLI, which keeps it until `dst` receives it. Messages with the same sender, receiver and tag are received in the order they were sent. The call returns once the CLI has accepted the message; it does not wait for `dst` to receive it.
-
-**Parameters**
-- `dst` (string): The name of the receiving project, as shown in `bsworkspace.json`. It must be another project.
-- `tag` (string): A label that tells messages apart. Up to 255 bytes. On ESP32, `dst` and `tag` together must also fit in one Bluetooth packet (about 480 bytes with the usual MTU); a longer request is a runtime error (`request too long`).
-- `value` (integer): The value to send.
-
-**Returns**
-- `void`
-
-**Errors**
-Throws a runtime error when `dst` is the project itself, when `dst` is not one of the projects being run, when `dst` has already finished, or when the program is not run by `bscript workspace run`. On ESP32 the error message is short (for example `send to self` or `beta finished`) to save memory. On ESP32 it is also an error when the request cannot be sent over Bluetooth (`send failed`), for example when the link stays congested.
-
-**Example**
-```ts
-sendInteger("actuator", "speed", 120);
-```
-
-### `receiveInteger(src: string, tag: string): integer`
-
-Waits for an integer sent by `src` with `sendInteger` under `tag`, and returns it. The program is blocked until the message arrives. Available only when the program is started by [`bscript workspace run`](../cli.md#bscript-workspace-run).
+| Type | Send | Broadcast | Receive |
+| :--- | :--- | :--- | :--- |
+| `integer` | `sendInteger(dst, tag, value)` | `broadcastInteger(tag, value)` | `receiveInteger(src, tag): integer` |
+| `float` | `sendFloat(dst, tag, value)` | `broadcastFloat(tag, value)` | `receiveFloat(src, tag): float` |
+| `boolean` | `sendBoolean(dst, tag, value)` | `broadcastBoolean(tag, value)` | `receiveBoolean(src, tag): boolean` |
+| `string` | `sendString(dst, tag, value)` | `broadcastString(tag, value)` | `receiveString(src, tag): string` |
+| `null` | `sendNull(dst, tag, value)` | `broadcastNull(tag, value)` | `receiveNull(src, tag): null` |
+| `integer[]` | `sendIntegerArray(dst, tag, value)` | `broadcastIntegerArray(tag, value)` | `receiveIntegerArray(src, tag): integer[]` |
+| `float[]` | `sendFloatArray(dst, tag, value)` | `broadcastFloatArray(tag, value)` | `receiveFloatArray(src, tag): float[]` |
+| `boolean[]` | `sendBooleanArray(dst, tag, value)` | `broadcastBooleanArray(tag, value)` | `receiveBooleanArray(src, tag): boolean[]` |
 
 **Parameters**
-- `src` (string): The name of the sending project. It must be another project.
-- `tag` (string): The tag the message was sent with. Up to 255 bytes. The same ESP32 limit on `src` and `tag` together applies as for `sendInteger`.
+- `dst` / `src` (string): The name of the receiving / sending project, as shown in `bsworkspace.json`. It must be another project.
+- `tag` (string): A label that tells messages apart. Up to 255 bytes.
+- `value`: The value to send, of the type in the function name.
 
-**Returns**
-- `integer`: The oldest value not yet received from `src` under `tag`.
+**How messages are delivered**
+- `send*` returns once the CLI has accepted the message; it does not wait for `dst` to receive it.
+- `broadcast*` sends a copy to every other project that is still running. Projects that have already finished are skipped, and with nobody to receive, the call does nothing. The receivers get it with `receive*` as if it had been sent with `send*`.
+- `receive*` waits until a message from `src` with `tag` arrives, and returns it.
+- Messages from the same sender to the same receiver with the same tag are received in the order they were sent, whatever their types.
+
+**Types**
+The receiving function must match the type of the message: a value sent with `sendFloat` must be received with `receiveFloat`. Otherwise `receive*` throws a runtime error (`type mismatch`) and that message is discarded.
+
+**Size limits**
+Strings and arrays are sent in one piece:
+- To or from an ESP32 board, a message must fit in one Bluetooth packet: about 490 bytes, including the project name and tag on the sending side. For example, an `integer[]` of about 120 elements. The size of a value is checked when it is sent, so `send*` and `broadcast*` throw a runtime error when the receiver cannot take it (`value too large`). A broadcast is then sent to nobody.
+- Between host projects, a message can be about 4 KB. A string takes two bytes per byte of text.
 
 **Errors**
-Throws a runtime error when:
-- `src` is the project itself.
-- `src` is not one of the projects being run.
-- `src` has finished without sending a matching message. Messages it sent before finishing can still be received.
-- Every running project is waiting in `receiveInteger` (a deadlock).
+`send*`, `broadcast*` and `receive*` throw a runtime error when:
+- `dst` or `src` is the project itself, or is not one of the projects being run.
+- `dst` has already finished, or `src` has finished without sending a matching message. Messages that `src` sent before finishing can still be received.
+- The message is of another type, or is too large (see above).
+- Every running project is waiting in `receive*` (a deadlock).
 - The program is not run by `bscript workspace run`.
 
-On ESP32 the error message is short (for example `deadlock` or `controller finished`) to save memory. As with `sendInteger`, a request that cannot be sent over Bluetooth is an error (`send failed`).
+On ESP32 the error message is short to save memory, for example `send to self`, `beta finished`, `type mismatch`, `value too large` or `deadlock`. It is also an error there when a request cannot be sent over Bluetooth (`send failed`) or does not fit in one packet (`request too long`).
 
 **Example**
 ```ts
+// In the project "controller"
+const speeds: integer[] = [100, 120, 90];
+sendIntegerArray("actuator", "speeds", speeds);
+broadcastString("mode", "run");
+
 // In the project "actuator"
-const speed = receiveInteger("controller", "speed");
-print(speed);
+const speeds = receiveIntegerArray("controller", "speeds");
+const mode = receiveString("controller", "mode");
 ```
 
 ## Console

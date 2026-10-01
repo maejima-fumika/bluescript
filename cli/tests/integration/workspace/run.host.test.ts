@@ -173,6 +173,107 @@ for (let i = 0; i < 3; i++) {
             exitSpy.mockRestore();
         });
 
+        it('broadcasts to every other project', async () => {
+            const { exitSpy, output, text } = await runWorkspace({
+                alpha: `
+broadcastInteger("start", 7);
+console.log(receiveInteger("beta", "ack") + receiveInteger("gamma", "ack"));`,
+                beta: 'sendInteger("alpha", "ack", receiveInteger("alpha", "start") * 10);',
+                gamma: 'sendInteger("alpha", "ack", receiveInteger("alpha", "start") * 100);',
+            });
+
+            expectExitCode(exitSpy, 0, output);
+            expect(text).toMatch(/^\[alpha\] .*770$/m);
+            expect(text).not.toContain('runtime error');
+            exitSpy.mockRestore();
+        });
+
+        it('exchanges every type of value', async () => {
+            const { exitSpy, output, text } = await runWorkspace({
+                alpha: `
+sendInteger("beta", "t", -5);
+sendFloat("beta", "t", 1.25);
+sendBoolean("beta", "t", true);
+sendString("beta", "t", "héllo, world");
+sendNull("beta", "t", null);
+const ia: integer[] = [1, -2, 3];
+sendIntegerArray("beta", "t", ia);
+const fa: float[] = [0.5, 2.0];
+sendFloatArray("beta", "t", fa);
+const ba: boolean[] = [true, false];
+sendBooleanArray("beta", "t", ba);`,
+                beta: `
+console.log(receiveInteger("alpha", "t"));
+console.log(receiveFloat("alpha", "t"));
+console.log(receiveBoolean("alpha", "t"));
+console.log(receiveString("alpha", "t"));
+console.log(receiveNull("alpha", "t"));
+const ia = receiveIntegerArray("alpha", "t");
+console.log(ia.length);
+console.log(ia[0]);
+console.log(ia[1]);
+console.log(ia[2]);
+const fa = receiveFloatArray("alpha", "t");
+console.log(fa[0]);
+console.log(fa[1]);
+const ba = receiveBooleanArray("alpha", "t");
+console.log(ba[0]);
+console.log(ba[1]);`,
+            });
+
+            expectExitCode(exitSpy, 0, output);
+            const betaLines = text.split('\n')
+                .filter((line) => line.startsWith('[beta ]'))
+                .map((line) => line.replace(/^\[beta \] /, '').trim());
+            expect(betaLines.slice(-13)).toEqual([
+                '-5', '1.250000', 'true', "'héllo, world'", 'undefined',
+                '3', '1', '-2', '3', '0.500000', '2.000000', 'true', 'false',
+            ]);
+            expect(text).not.toContain('runtime error');
+            exitSpy.mockRestore();
+        });
+
+        it('broadcasts a string and sends a long one', async () => {
+            const { exitSpy, output, text } = await runWorkspace({
+                alpha: `
+broadcastString("greet", "hi");
+let s = "x";
+for (let i = 0; i < 10; i++) { s = s + s; }
+sendString("beta", "long", s);`,
+                beta: `
+console.log(receiveString("alpha", "greet"));
+console.log(receiveString("alpha", "long"));`,
+                gamma: 'console.log(receiveString("alpha", "greet"));',
+            });
+
+            expectExitCode(exitSpy, 0, output);
+            expect(text).toMatch(/^\[beta \] .*'hi'/m);
+            expect(text).toMatch(/^\[gamma\] .*'hi'/m);
+            expect(text).toContain(`'${'x'.repeat(1024)}'`);
+            exitSpy.mockRestore();
+        });
+
+        it('throws on a type mismatch and when a value is too large', async () => {
+            const { exitSpy, text } = await runWorkspace({
+                alpha: `
+sendFloat("beta", "t", 1.5);
+let s = "x";
+for (let i = 0; i < 11; i++) { s = s + s; }
+sendString("beta", "long", s);
+console.log("unreachable");`,
+                beta: `
+console.log(receiveInteger("alpha", "t"));
+console.log("unreachable");`,
+            });
+
+            expect(text).toMatch(
+                /\[beta \].*runtime error: Type mismatch: alpha sent a float with tag "t", but beta expected an integer\./,
+            );
+            expect(text).toMatch(/\[alpha\].*runtime error: the value is too large to send/);
+            expect(text).not.toContain('unreachable');
+            exitSpy.mockRestore();
+        });
+
         it('throws when receiving from a project that has finished', async () => {
             const { exitSpy, text } = await runWorkspace({
                 alpha: `

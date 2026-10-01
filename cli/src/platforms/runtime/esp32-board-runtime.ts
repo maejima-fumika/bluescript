@@ -3,7 +3,7 @@ import { MemoryImage } from "@bscript/lang";
 import { ProgramOutput } from "../../core/program-output";
 import { BoardRuntime } from "./board-runtime";
 import { CompileContext } from "../compiler/compiler-adapter";
-import { answerReceive, answerSend, MessagePort, MessageReplier, NO_WORKSPACE_PORT } from "../messaging";
+import { answerBroadcast, answerReceive, answerSend, MessagePort, MessageReplier, MessageValue, NO_WORKSPACE_PORT } from "../messaging";
 
 
 export class Esp32BoardRuntime implements BoardRuntime<MemoryImage> {
@@ -42,14 +42,17 @@ export class Esp32BoardRuntime implements BoardRuntime<MemoryImage> {
         const deviceService = this.deviceService;
         // Memory is scarce on the board, so it only gets the short text.
         const replier: MessageReplier = {
-            reply: (value) => deviceService.reply(value),
+            reply: (message) => deviceService.reply(message),
             replyError: (error) => deviceService.replyError(error.shortMessage),
         };
-        deviceService.on('send', (dst, tag, value) => {
-            void answerSend(this.messagePort, replier, dst, tag, value);
+        deviceService.on('send', (dst, tag, message) => {
+            void answerSend(this.messagePort, replier, dst, tag, message);
         });
-        deviceService.on('receive', (src, tag) => {
-            void answerReceive(this.messagePort, replier, src, tag);
+        deviceService.on('receive', (src, tag, expected) => {
+            void answerReceive(this.messagePort, replier, src, tag, expected);
+        });
+        deviceService.on('broadcast', (tag, message) => {
+            void answerBroadcast(this.messagePort, replier, tag, message);
         });
     }
 
@@ -87,5 +90,9 @@ export class Esp32BoardRuntime implements BoardRuntime<MemoryImage> {
 
     setMessagePort(port: MessagePort): void {
         this.messagePort = port;
+    }
+
+    canReceiveMessage(message: MessageValue): boolean {
+        return this.deviceService?.canReceive(message) ?? false;
     }
 }

@@ -27,6 +27,7 @@ typedef enum {
     PROTOCOL_RECEIVE,
     PROTOCOL_REPLY,
     PROTOCOL_REPLY_ERROR,
+    PROTOCOL_BROADCAST,
 
     PROTOCOL_END
 } protocol_t;
@@ -148,7 +149,6 @@ void bs_protocol_write_memory_layout(bs_memory_layout_t* layout) {
     }
 }
 
-#define MESSAGE_TYPE_INTEGER  0
 #define MESSAGE_MAX_NAME_LEN  255
 #define MESSAGE_MAX_REASON_LEN 63   // the CLI sends ESP32 only short reasons
 
@@ -159,14 +159,16 @@ static uint32_t write_name(uint8_t* buffer, const char* name) {
     return 1 + len;
 }
 
-// | cmd(1) | nameLen(1) | name | tagLen(1) | tag | type(1) | value(4, if has_value) |
-static int write_message_request(uint8_t cmd, const char* name, const char* tag, bool has_value, int32_t value) {
-    uint32_t name_len = strlen(name);
+// | cmd(1) | nameLen(1) | name | tagLen(1) | tag | type(1) | value(value_len) |
+// The nameLen and name fields are left out when `name` is NULL.
+static int write_message_request(uint8_t cmd, const char* name, const char* tag, uint8_t type,
+                                 uint32_t value_len, bs_value_writer_t write_value, void* arg) {
+    uint32_t name_len = name == NULL ? 0 : strlen(name);
     uint32_t tag_len = strlen(tag);
     if (name_len > MESSAGE_MAX_NAME_LEN || tag_len > MESSAGE_MAX_NAME_LEN)
         return BS_PROTOCOL_ERR_NAME_TOO_LONG;
 
-    uint32_t buffer_len = PROTOCOL_LEN + 1 + name_len + 1 + tag_len + 1 + (has_value ? sizeof(int32_t) : 0);
+    uint32_t buffer_len = PROTOCOL_LEN + (name == NULL ? 0 : 1 + name_len) + 1 + tag_len + 1 + value_len;
     // A request that does not fit in one packet would be dropped, and the
     // program would wait forever for a reply to it.
     if (buffer_len > max_send_size())
@@ -179,23 +181,74 @@ static int write_message_request(uint8_t cmd, const char* name, const char* tag,
     }
     uint32_t idx = 0;
     buffer[idx++] = cmd;
-    idx += write_name(buffer + idx, name);
+    if (name != NULL)
+        idx += write_name(buffer + idx, name);
     idx += write_name(buffer + idx, tag);
-    buffer[idx++] = MESSAGE_TYPE_INTEGER;
-    if (has_value)
-        memcpy(buffer + idx, &value, sizeof(int32_t));
+    buffer[idx++] = type;
+    if (value_len > 0)
+        write_value(buffer + idx, arg);
     // A request that is not sent would never be answered, so the caller must not wait for it.
     int result = send_buffer_with_retry(buffer, buffer_len);
     free(buffer);
     return result == 0 ? 0 : BS_PROTOCOL_ERR_SEND_FAILED;
 }
 
-int bs_protocol_write_send(const char* dst, const char* tag, int32_t value) {
-    return write_message_request(PROTOCOL_SEND, dst, tag, true, value);
+int bs_protocol_write_send(const char* dst, const char* tag, uint8_t type,
+                           uint32_t value_len, bs_value_writer_t write_value, void* arg) {
+    return write_message_request(PROTOCOL_SEND, dst, tag, type, value_len, write_value, arg);
 }
 
-int bs_protocol_write_receive(const char* src, const char* tag) {
-    return write_message_request(PROTOCOL_RECEIVE, src, tag, false, 0);
+int bs_protocol_write_broadcast(const char* tag, uint8_t type,
+                                uint32_t value_len, bs_value_writer_t write_value, void* arg) {
+    return write_message_request(PROTOCOL_BROADCAST, NULL, tag, type, value_len, write_value, arg);
+}
+
+int bs_protocol_write_receive(const char* src, const char* tag, uint8_t type) {
+    return write_message_request(PROTOCOL_RECEIVE, src, tag, type, 0, NULL, NULL);
+}
+
+// Reads the value of a Reply at `value` (after the type byte) into `reply`, and
+// returns its length, or -1 when it is malformed or longer than `len` bytes.
+// Fixed-size values are kept in `reply`; the bytes of variable-size values are
+// copied to a malloc'd buffer, since `buffer` is reused once this returns.
+static int32_t read_reply_value(uint8_t type, const uint8_t* value, uint32_t len,
+                                bs_message_reply_t* reply, const char** error) {
+    uint32_t elem_size;
+    switch (type) {
+        case BS_MSG_INTEGER:
+        case BS_MSG_FLOAT:
+            if (len < 4) return -1;
+            memcpy(&reply->scalar, value, 4);
+            return 4;
+        case BS_MSG_BOOLEAN:
+            if (len < 1) return -1;
+            reply->scalar.i = value[0];
+            return 1;
+        case BS_MSG_NULL:
+            return 0;
+        case BS_MSG_STRING:
+        case BS_MSG_BOOLEAN_ARRAY:
+            elem_size = 1;
+            break;
+        case BS_MSG_INTEGER_ARRAY:
+        case BS_MSG_FLOAT_ARRAY:
+            elem_size = 4;
+            break;
+        default:
+            return -1;
+    }
+    if (len < 2) return -1;
+    uint16_t count;
+    memcpy(&count, value, 2);
+    uint32_t size = count * elem_size;
+    if (len < 2 + size) return -1;
+    reply->count = count;
+    reply->data = (uint8_t*)malloc(size > 0 ? size : 1);
+    if (reply->data == NULL)
+        *error = "out of memory";
+    else
+        memcpy(reply->data, value + 2, size);
+    return 2 + size;
 }
 
 void bs_protocol_read(uint8_t* buffer, uint32_t len) {
@@ -230,12 +283,23 @@ void bs_protocol_read(uint8_t* buffer, uint32_t len) {
             break;
         }
         case PROTOCOL_REPLY:
-        // | cmd(1byte) | type(1byte) | value(4byte) |
+        // | cmd(1byte) | type(1byte) | value |
         {
-            int32_t value;
-            memcpy(&value, buffer + (idx+2), sizeof(int32_t));
-            bs_main_thread_set_reply(value, NULL);
-            idx += 6;
+            bs_message_reply_t reply = { .type = buffer[idx+1] };
+            const char* error = NULL;
+            int32_t value_len = idx + 2 <= len
+                ? read_reply_value(reply.type, buffer + (idx+2), len - (idx+2), &reply, &error)
+                : -1;
+            if (value_len < 0) {
+                // The rest of the buffer cannot be parsed either.
+                bs_main_thread_set_reply_error("bad reply");
+                return;
+            }
+            if (error != NULL)
+                bs_main_thread_set_reply_error(error);
+            else
+                bs_main_thread_set_reply(&reply);
+            idx += 2 + value_len;
             break;
         }
         case PROTOCOL_REPLY_ERROR:
@@ -246,7 +310,7 @@ void bs_protocol_read(uint8_t* buffer, uint32_t len) {
             char reason[MESSAGE_MAX_REASON_LEN + 1];
             memcpy(reason, buffer + (idx+2), copy_len);
             reason[copy_len] = '\0';
-            bs_main_thread_set_reply(0, reason);
+            bs_main_thread_set_reply_error(reason);
             idx += 2 + reason_len;
             break;
         }
