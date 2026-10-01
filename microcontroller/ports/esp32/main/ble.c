@@ -42,6 +42,11 @@ static void gatts_profile_shell_event_handler(esp_gatts_cb_event_t event, esp_ga
 
 #define GATTS_CHAR_VAL_LEN_MAX 0x40
 #define MAX_MTU_SIZE  512
+#define ATT_HEADER_SIZE  3   // opcode(1) + handle(2) of an indication
+
+// ATT MTU of the current connection: the default until the client negotiates a larger one.
+// Written by the BLE task and read by the main thread.
+static volatile uint16_t current_mtu = ESP_GATT_DEF_BLE_MTU_SIZE;
 #define PREPARE_BUF_MAX_SIZE 1024
 
 static uint8_t char1_str[] = {0x11,0x22,0x33};
@@ -305,6 +310,7 @@ static void gatts_profile_shell_event_handler(esp_gatts_cb_event_t event, esp_ga
         break;
     case ESP_GATTS_MTU_EVT:
         ESP_LOGI(GATTS_TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
+        current_mtu = param->mtu.mtu;
         break;
     case ESP_GATTS_UNREG_EVT:
         break;
@@ -371,6 +377,7 @@ static void gatts_profile_shell_event_handler(esp_gatts_cb_event_t event, esp_ga
                  param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
                  param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
         gl_profile_tab[PROFILE_SHELL_APP_ID].conn_id = param->connect.conn_id;
+        current_mtu = ESP_GATT_DEF_BLE_MTU_SIZE;
         break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
@@ -483,15 +490,26 @@ void bs_ble_init(void)
     return;
 }
 
-void bs_ble_send_buffer(uint8_t *buffer, uint32_t len) {
-    if (len < MAX_MTU_SIZE) {
-        esp_ble_gatts_send_indicate(
-            gl_profile_tab[PROFILE_SHELL_APP_ID].gatts_if, 
-            gl_profile_tab[PROFILE_SHELL_APP_ID].conn_id, 
-            gl_profile_tab[PROFILE_SHELL_APP_ID].char_handle, 
-            len, buffer, false
-        );
-    } else {
+uint32_t bs_ble_max_send_size(void) {
+    uint32_t size = current_mtu - ATT_HEADER_SIZE;
+    // bs_ble_send_buffer also drops buffers of MAX_MTU_SIZE bytes or more.
+    return size < MAX_MTU_SIZE ? size : MAX_MTU_SIZE - 1;
+}
+
+int bs_ble_send_buffer(uint8_t *buffer, uint32_t len) {
+    if (len >= MAX_MTU_SIZE) {
         ESP_LOGE(GATTS_TAG, "The buffer length exceeds the max MTU size.");
-    }   
+        return BS_BLE_ERR_FAILED;
+    }
+    esp_err_t err = esp_ble_gatts_send_indicate(
+        gl_profile_tab[PROFILE_SHELL_APP_ID].gatts_if, 
+        gl_profile_tab[PROFILE_SHELL_APP_ID].conn_id, 
+        gl_profile_tab[PROFILE_SHELL_APP_ID].char_handle, 
+        len, buffer, false
+    );
+    if (err == ESP_OK)
+        return BS_BLE_OK;
+    ESP_LOGE(GATTS_TAG, "Failed to send a buffer, error code = %x", err);
+    // ESP_FAIL is returned when the L2CAP channel is congested (or the BTC queue is full).
+    return err == ESP_FAIL ? BS_BLE_ERR_BUSY : BS_BLE_ERR_FAILED;
 }

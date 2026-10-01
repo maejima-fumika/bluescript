@@ -13,6 +13,7 @@ import {
     spyGlobalSettings,
 } from '../../commands/global-env-helper';
 import {
+    captureOutput,
     captureStdout,
     createHostProject,
     describeHostIntegration,
@@ -68,6 +69,23 @@ describeHostIntegration('project run command (host integration)', () => {
         expect(stdout.text()).toContain('hello from run');
 
         stdout.restore();
+        exitSpy.mockRestore();
+    });
+
+    it('rejects messages between projects outside a workspace', async () => {
+        const exitSpy = mockProcessExit();
+        const output = captureOutput();
+
+        createHostProject(currentProjectRoot, {
+            'src/index.bs': 'sendInteger("other", "t", 1);\nconsole.log("unreachable");',
+        }, HOST_INTEGRATION_RUNTIME_DIR);
+
+        await handleRunCommand({ withRepl: false, withNotebook: false });
+
+        expect(output.text()).toMatch(/runtime error: .*only available in `bscript workspace run`/);
+        expect(output.text()).not.toContain('unreachable');
+
+        output.restore();
         exitSpy.mockRestore();
     });
 

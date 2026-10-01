@@ -5,12 +5,18 @@ import { BoardRuntime } from "./board-runtime";
 import { CompileContext } from "../compiler/compiler-adapter";
 import { HostBoardConfig } from "../../config/global-config";
 import { HostService, ProcessConnection } from '../../services/process';
+import { answerReceive, answerSend, MessagePort, MessageReplier, NO_WORKSPACE_PORT } from "../messaging";
 
 
 export class HostBoardRuntime implements BoardRuntime<SharedLibrary> {
     private programOutput: ProgramOutput;
     private shellProcess: ProcessConnection;
     private hostService: HostService;
+    private messagePort: MessagePort = NO_WORKSPACE_PORT;
+    private readonly replier: MessageReplier = {
+        reply: (value) => this.hostService.reply(value),
+        replyError: (error) => this.hostService.replyError(error.message),
+    };
 
     constructor(
         private boardConfig: HostBoardConfig,
@@ -34,6 +40,12 @@ export class HostBoardRuntime implements BoardRuntime<SharedLibrary> {
         });
         this.hostService.on('error', (message) => {
             this.programOutput.writeError(message);
+        });
+        this.hostService.on('send', (dst, tag, value) => {
+            void answerSend(this.messagePort, this.replier, dst, tag, value);
+        });
+        this.hostService.on('receive', (src, tag) => {
+            void answerReceive(this.messagePort, this.replier, src, tag);
         });
     }
 
@@ -59,6 +71,10 @@ export class HostBoardRuntime implements BoardRuntime<SharedLibrary> {
 
     setOutput(output: ProgramOutput): void {
         this.programOutput = output;
+    }
+
+    setMessagePort(port: MessagePort): void {
+        this.messagePort = port;
     }
 
     private getShellPath(): string {

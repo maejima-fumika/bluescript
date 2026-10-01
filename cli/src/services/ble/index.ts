@@ -4,7 +4,7 @@ import { DEFAULT_DEVICE_NAME } from "../../config/project-config";
 import { logger } from "../../core/logger";
 import { AsyncLock } from "../../core/async";
 import { Connection, ConnectionMessage, Service } from "../common";
-import { Protocol, ProtocolPacketBuilder, ProtocolParser } from "../device-protocol";
+import { Protocol, ProtocolPacketBuilder, ProtocolParser } from "../protocol/device-protocol";
 import { BleTransport, createBleTransport } from "./transport";
 
 const MTU = 495;
@@ -21,6 +21,8 @@ export type DeviceServiceEvents = {
     profile: (fid: number, paramtypes: string[]) => void;
     exectime: (id: number, time: number) => void;
     memory: (layout: MemoryLayout) => void;
+    send: (dst: string, tag: string, value: number) => void;
+    receive: (src: string, tag: string) => void;
 };
 
 export class DeviceService extends Service<DeviceServiceEvents, Buffer> {
@@ -73,6 +75,16 @@ export class DeviceService extends Service<DeviceServiceEvents, Buffer> {
         return p;
     }
 
+    /** Answers the program's pending `sendInteger` or `receiveInteger`. */
+    public async reply(value: number): Promise<void> {
+        await this.send("reply", new ProtocolPacketBuilder(MTU).reply(value).build());
+    }
+
+    /** Makes the program's pending `sendInteger` or `receiveInteger` throw. */
+    public async replyError(reason: string): Promise<void> {
+        await this.send("replyError", new ProtocolPacketBuilder(MTU).replyError(reason).build());
+    }
+
     private handleReceivedData(data: Buffer) {
         const parseResult = new ProtocolParser().parse(data);
         switch (parseResult.protocol) {
@@ -90,6 +102,13 @@ export class DeviceService extends Service<DeviceServiceEvents, Buffer> {
                 break;
             case Protocol.Memory:
                 this.handleMessage("memory", [parseResult.layout]);
+                break;
+            case Protocol.Send:
+                this.handleMessage("send", [parseResult.dst, parseResult.tag, parseResult.value]);
+                break;
+            case Protocol.Receive:
+                this.handleMessage("receive", [parseResult.src, parseResult.tag]);
+                break;
         }
     }
 }

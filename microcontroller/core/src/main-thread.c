@@ -13,6 +13,8 @@
 #include "../include/protocol.h"
 
 # define TASK_ITEM_QUEUE_LENGTH   5
+# define REPLY_QUEUE_LENGTH       1
+# define REPLY_ERROR_SIZE         64   // the CLI sends ESP32 only short reasons
 
 typedef enum {
     TASK_RESET,
@@ -44,6 +46,16 @@ typedef union {
 
 static QueueHandle_t task_item_queue;
 
+typedef struct {
+    int32_t value;
+    bool is_error;
+    char error[REPLY_ERROR_SIZE];
+} reply_item_t;
+
+// Replies to sendInteger / receiveInteger. The main thread waits on this queue
+// while the program runs, so it is separate from task_item_queue.
+static QueueHandle_t reply_queue;
+
 static void main_thread_init(bs_memory_layout_t* memory_layout) {
     BS_LOG_INFO("Initialize main thread")
     gc_initialize();
@@ -51,6 +63,7 @@ static void main_thread_init(bs_memory_layout_t* memory_layout) {
     bs_memory_get_layout(memory_layout);
     bs_stdmodule_main();
     task_item_queue = xQueueCreate(TASK_ITEM_QUEUE_LENGTH, sizeof(task_item_u));
+    reply_queue = xQueueCreate(REPLY_QUEUE_LENGTH, sizeof(reply_item_t));
 }
 
 static void main_thread_reset() {
@@ -59,6 +72,7 @@ static void main_thread_reset() {
     gc_initialize();
     bs_stdmodule_main();
     xQueueReset(task_item_queue);
+    xQueueReset(reply_queue);
 }
 
 static float task_call_main(int32_t id, void* address) {
@@ -153,4 +167,28 @@ void bs_main_thread_set_profile(uint8_t fid, char* profile) {
     task_item.send_profile.fid = fid;
     task_item.send_profile.profile = profile2;
     xQueueSendFromISR(task_item_queue, &task_item, &yield);
+}
+
+void bs_main_thread_set_reply(int32_t value, const char* error) {
+    reply_item_t item;
+    item.value = value;
+    item.is_error = error != NULL;
+    item.error[0] = '\0';
+    if (error != NULL) {
+        strncpy(item.error, error, REPLY_ERROR_SIZE - 1);
+        item.error[REPLY_ERROR_SIZE - 1] = '\0';
+    }
+    xQueueSend(reply_queue, &item, portMAX_DELAY);
+}
+
+int bs_main_thread_wait_reply(int32_t* value, char* error, int error_size) {
+    reply_item_t item;
+    xQueueReceive(reply_queue, &item, portMAX_DELAY);
+    if (item.is_error) {
+        snprintf(error, error_size, "%s", item.error);
+        return -1;
+    }
+    if (value != NULL)
+        *value = item.value;
+    return 0;
 }

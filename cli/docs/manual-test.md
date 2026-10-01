@@ -729,6 +729,18 @@ Each item has an ID for bug reports and test records. Record pass/fail in the [t
 - **Steps:** Run `bscript workspace remove <project>`; run it again for the same project; delete another project's directory, then remove it; run `bscript workspace remove` outside any workspace
 - **Expected:** The entry is removed from `bsworkspace.json` and the project directory is kept; removing a project that is not in the workspace or running outside a workspace fails with a clear message; a project whose directory is gone can still be removed
 
+#### MT-WS-10: Messages between two ESP32 boards and a host project
+
+- **Priority:** P1 · **Requires:** esp32 (two boards, flashed with a runtime that includes `sendInteger`) + host
+- **Steps:** Set up MT-WS-05. In board A: `for (let i = 0; i < 5; i++) { sendInteger("<board-B>", "ping", i); print(receiveInteger("<host>", "pong")); }`. In board B: `for (let i = 0; i < 5; i++) { sendInteger("<host>", "ping", receiveInteger("<board-A>", "ping") * 10); }`. In host: `for (let i = 0; i < 5; i++) { sendInteger("<board-A>", "pong", receiveInteger("<board-B>", "ping") + 1); }`. Run `bscript workspace run`
+- **Expected:** Board A prints `1`, `11`, `21`, `31`, `41` in order; every project finishes; exit code `0`
+
+#### MT-WS-11: Messaging errors on ESP32
+
+- **Priority:** P2 · **Requires:** esp32 (two boards)
+- **Steps:** (1) Board A calls `receiveInteger("<board-B>", "t")` while board B only prints. (2) Both boards call `receiveInteger` on each other. (3) Board A calls `sendInteger("missing", "t", 1)`. (4) Board A calls `sendInteger("<board-A>", "t", 1)`; run again with `receiveInteger("<board-A>", "t")` instead. (5) `bscript project run` a project that calls `sendInteger`. (6) Board A calls `sendInteger` with a 250-character `dst` and a 250-character `tag`
+- **Expected:** Short messages: (1) Board A shows `** runtime error: <board-B> finished`. (2) Both boards show `** runtime error: deadlock`. (3) `** runtime error: no project missing`. (4) `** runtime error: send to self`, then `** runtime error: receive from self` on the second run. (5) `** runtime error: not in workspace`. (6) `** runtime error: request too long` right away, instead of hanging. In every case the statements after the failing call do not run, and the boards stay connected
+
 ---
 
 ## End-to-end scenarios
@@ -832,3 +844,4 @@ Jest **unit** tests in `cli/tests/` mock filesystem, network, and device I/O. **
 | Workspace: two host projects with prefixed output | MT-WS-04 |
 | Workspace: compile error stops everything | MT-WS-07 (host) |
 | Workspace: subset by name / unknown name | MT-WS-08 |
+| Workspace: sendInteger / receiveInteger ping-pong and errors (host) | MT-WS-10, MT-WS-11 (host only) |

@@ -140,4 +140,90 @@ describeHostIntegration('workspace run command (host integration)', () => {
         output.restore();
         exitSpy.mockRestore();
     });
+
+    describe('messages between projects', () => {
+        async function runWorkspace(projects: Record<string, string>) {
+            const exitSpy = mockProcessExit();
+            const output = captureOutput();
+            createWorkspace(projects);
+            await handleWorkspaceRunCommand([]);
+            const text = output.text().replace(ANSI_PATTERN, '');
+            output.restore();
+            return { exitSpy, output, text };
+        }
+
+        it('exchanges integers through the CLI', async () => {
+            const { exitSpy, output, text } = await runWorkspace({
+                alpha: `
+for (let i = 0; i < 3; i++) {
+    sendInteger("beta", "ping", i);
+    console.log(receiveInteger("beta", "pong"));
+}`,
+                beta: `
+for (let i = 0; i < 3; i++) {
+    const v = receiveInteger("alpha", "ping");
+    sendInteger("alpha", "pong", v * 10 - 1);
+}`,
+            });
+
+            expectExitCode(exitSpy, 0, output);
+            const alphaLines = text.split('\n').filter((line) => line.startsWith('[alpha]'));
+            expect(alphaLines.join('\n')).toMatch(/-1[\s\S]*9[\s\S]*19/);
+            expect(text).not.toContain('runtime error');
+            exitSpy.mockRestore();
+        });
+
+        it('throws when receiving from a project that has finished', async () => {
+            const { exitSpy, text } = await runWorkspace({
+                alpha: `
+console.log(receiveInteger("beta", "t"));
+console.log("unreachable");`,
+                beta: 'console.log("beta done");',
+            });
+
+            expect(text).toMatch(/\[alpha\].*runtime error: beta has finished/);
+            expect(text).not.toContain('unreachable');
+            exitSpy.mockRestore();
+        });
+
+        it('throws when sending to an unknown project', async () => {
+            const { exitSpy, text } = await runWorkspace({
+                alpha: `
+sendInteger("missing", "t", 1);
+console.log("unreachable");`,
+                beta: 'console.log("beta done");',
+            });
+
+            expect(text).toMatch(/\[alpha\].*runtime error: Cannot send to missing/);
+            expect(text).not.toContain('unreachable');
+            exitSpy.mockRestore();
+        });
+
+        it('throws when a project sends to or receives from itself', async () => {
+            const { exitSpy, text } = await runWorkspace({
+                alpha: `
+sendInteger("alpha", "t", 1);
+console.log("unreachable");`,
+                beta: `
+console.log(receiveInteger("beta", "t"));
+console.log("unreachable");`,
+            });
+
+            expect(text).toMatch(/\[alpha\].*runtime error: Cannot send to alpha: a project cannot send a message to itself/);
+            expect(text).toMatch(/\[beta \].*runtime error: Cannot receive from beta: a project cannot receive a message from itself/);
+            expect(text).not.toContain('unreachable');
+            exitSpy.mockRestore();
+        });
+
+        it('reports a deadlock', async () => {
+            const { exitSpy, text } = await runWorkspace({
+                alpha: 'console.log(receiveInteger("beta", "t"));',
+                beta: 'console.log(receiveInteger("alpha", "t"));',
+            });
+
+            expect(text).toMatch(/\[alpha\].*Deadlock/);
+            expect(text).toMatch(/\[beta \].*Deadlock/);
+            exitSpy.mockRestore();
+        });
+    });
 });

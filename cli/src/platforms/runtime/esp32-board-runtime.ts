@@ -3,12 +3,14 @@ import { MemoryImage } from "@bscript/lang";
 import { ProgramOutput } from "../../core/program-output";
 import { BoardRuntime } from "./board-runtime";
 import { CompileContext } from "../compiler/compiler-adapter";
+import { answerReceive, answerSend, MessagePort, MessageReplier, NO_WORKSPACE_PORT } from "../messaging";
 
 
 export class Esp32BoardRuntime implements BoardRuntime<MemoryImage> {
     private ble: BleConnection | null = null;
     private deviceService: DeviceService | null = null;
     private programOutput: ProgramOutput;
+    private messagePort: MessagePort = NO_WORKSPACE_PORT;
 
     constructor(
         private deviceName: string,
@@ -37,6 +39,18 @@ export class Esp32BoardRuntime implements BoardRuntime<MemoryImage> {
         this.deviceService = this.ble.getService('device');
         this.deviceService.on('log', (message) => this.programOutput.write(message));
         this.deviceService.on('error', (message) => this.programOutput.writeError(message));
+        const deviceService = this.deviceService;
+        // Memory is scarce on the board, so it only gets the short text.
+        const replier: MessageReplier = {
+            reply: (value) => deviceService.reply(value),
+            replyError: (error) => deviceService.replyError(error.shortMessage),
+        };
+        deviceService.on('send', (dst, tag, value) => {
+            void answerSend(this.messagePort, replier, dst, tag, value);
+        });
+        deviceService.on('receive', (src, tag) => {
+            void answerReceive(this.messagePort, replier, src, tag);
+        });
     }
 
     async disconnect(): Promise<void> {
@@ -69,5 +83,9 @@ export class Esp32BoardRuntime implements BoardRuntime<MemoryImage> {
 
     setOutput(output: ProgramOutput): void {
         this.programOutput = output;
+    }
+
+    setMessagePort(port: MessagePort): void {
+        this.messagePort = port;
     }
 }

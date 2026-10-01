@@ -9,6 +9,7 @@ import { terminal } from "../../core/terminal";
 import { DEFAULT_DEVICE_NAME } from "../../config/project-config";
 import { WorkspaceConfigHandler, WorkspaceProject } from "../../config/workspace-config";
 import { ProjectSession, SessionDisconnectedError } from "../../platforms/project-session";
+import { MessageRouter } from "../../platforms/messaging";
 import { CommandHandlerWithUpdateCheck } from "../command";
 
 type Member = {
@@ -21,6 +22,7 @@ type Member = {
 
 class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
     private members: Member[] = [];
+    private router?: MessageRouter;
     private readonly failed = new Set<string>();
 
     constructor(
@@ -63,12 +65,16 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
     private setup() {
         const projects = this.workspaceConfigHandler.resolveProjects(this.projectNames);
         const tags = createTags(projects.map((p) => p.name));
+        const router = new MessageRouter(projects.map((p) => p.name));
+        this.router = router;
 
         this.members = projects.map((p) => {
             const tag = tags.get(p.name)!;
             const output = new LineOutput(tag);
             const session = new ProjectSession(p.project, this.globalConfigHandler, output, p.deviceName);
+            session.setMessagePort(router.portFor(p.name));
             session.on('disconnected', () => {
+                router.close(p.name);
                 this.failed.add(p.name);
                 output.flush();
                 logger.error(tag, 'Disconnected.');
@@ -147,9 +153,11 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
     private async executeOne(m: Member) {
         try {
             await m.session.execute(m.compileOutput!);
+            this.router?.close(m.name);
             m.output.flush();
             logger.success(m.tag, 'Finished.');
         } catch (error) {
+            this.router?.close(m.name);
             this.failed.add(m.name);
             // A disconnection is already reported by the 'disconnected' listener.
             if (!(error instanceof SessionDisconnectedError)) {

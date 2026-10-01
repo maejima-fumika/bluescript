@@ -12,7 +12,18 @@ export enum Protocol {
     Error,
     Memory,
     Exectime,
-    Profile
+    Profile,
+
+    // Messages between the projects in a workspace.
+    Send,
+    Receive,
+    Reply,
+    ReplyError,
+}
+
+/** The type of a value carried by the messaging commands. */
+export enum MessageValueType {
+    Integer = 0,
 }
 
 
@@ -24,6 +35,9 @@ const FIRST_HEADER = Buffer.from([0x03, 0x00]);
 const LOAD_HEADER_SIZE = 9;   // cmd(1) + address(4) + size(4)
 const JUMP_HEADER_SIZE = 9;   // cmd(1) + id(4) + address(4)
 const RESET_HEADER_SIZE = 1;  // cmd(1)
+const REPLY_SIZE = 6;         // cmd(1) + type(1) + value(4)
+// The device keeps the reason in a 64-byte buffer (REPLY_ERROR_SIZE in main-thread.c).
+const REPLY_ERROR_MAX_LENGTH = 63;
 
 const ALIGNMENT = 4;
 
@@ -136,6 +150,25 @@ export class ProtocolPacketBuilder {
         return this.appendCommand(header);
     }
 
+    /** Answers a Send or Receive request from the device. */
+    public reply(value: number) {
+        const command = Buffer.allocUnsafe(REPLY_SIZE);
+        command.writeUInt8(Protocol.Reply, 0);                 // cmd(1)
+        command.writeUInt8(MessageValueType.Integer, 1);       // type(1)
+        command.writeInt32LE(value, 2);                        // value(4)
+        return this.appendCommand(command);
+    }
+
+    /** Makes a pending Send or Receive request on the device throw `reason`. */
+    public replyError(reason: string) {
+        let message = Buffer.from(reason, 'utf-8');
+        if (message.length > REPLY_ERROR_MAX_LENGTH) {
+            message = message.subarray(0, REPLY_ERROR_MAX_LENGTH);
+        }
+        const header = Buffer.from([Protocol.ReplyError, message.length]); // cmd(1) + len(1)
+        return this.appendCommand(Buffer.concat([header, message]));
+    }
+
     private appendCommand(commandData: Buffer) {
         if (commandData.length > this.lastUnitRemain) {
             this.flushUnit();
@@ -169,6 +202,10 @@ type ProtocolPayloads = {
     [Protocol.Memory]: { layout: MemoryLayout };
     [Protocol.Exectime]: { id: number; time: number };
     [Protocol.Profile]: { fid: number; paramtypes: string[] };
+    [Protocol.Send]: { dst: string; tag: string; value: number };
+    [Protocol.Receive]: { src: string; tag: string };
+    [Protocol.Reply]: {};
+    [Protocol.ReplyError]: {};
 }
 
 export type ParseResult<T extends Protocol = Protocol> = {
@@ -187,6 +224,8 @@ export class ProtocolParser {
             [Protocol.Memory]: ProtocolParser.parseMemory,
             [Protocol.Exectime]: ProtocolParser.parseExectime,
             [Protocol.Profile]: ProtocolParser.parseProfile,
+            [Protocol.Send]: ProtocolParser.parseSend,
+            [Protocol.Receive]: ProtocolParser.parseReceive,
         }
     }
 
@@ -245,5 +284,52 @@ export class ProtocolParser {
         const textDecoder = new TextDecoder();
         const paramStr = textDecoder.decode(buffer.subarray(offset, buffer.length - 1));
         return { fid, paramtypes: paramStr ? paramStr.split(", ") : [] };
+    }
+
+    // | dstLen(1) | dst | tagLen(1) | tag | type(1) | value(4) |
+    static parseSend(buffer: Buffer, offset: number): {dst: string, tag: string, value: number} {
+        const reader = new MessageReader(buffer, offset);
+        const dst = reader.readName();
+        const tag = reader.readName();
+        const value = reader.readValue();
+        return { dst, tag, value };
+    }
+
+    // | srcLen(1) | src | tagLen(1) | tag | type(1) |
+    static parseReceive(buffer: Buffer, offset: number): {src: string, tag: string} {
+        const reader = new MessageReader(buffer, offset);
+        const src = reader.readName();
+        const tag = reader.readName();
+        reader.readValueType();
+        return { src, tag };
+    }
+}
+
+class MessageReader {
+    constructor(private buffer: Buffer, private offset: number) {}
+
+    readName(): string {
+        const length = this.buffer.readUInt8(this.offset); this.offset += 1;
+        const end = this.offset + length;
+        if (end > this.buffer.length) {
+            throw new Error('Failed to parse message. The name is truncated.');
+        }
+        const name = this.buffer.toString('utf-8', this.offset, end);
+        this.offset = end;
+        return name;
+    }
+
+    readValueType(): MessageValueType {
+        const type = this.buffer.readUInt8(this.offset); this.offset += 1;
+        if (type !== MessageValueType.Integer) {
+            throw new Error(`Failed to parse message. Unknown value type ${type}.`);
+        }
+        return type;
+    }
+
+    readValue(): number {
+        this.readValueType();
+        const value = this.buffer.readInt32LE(this.offset); this.offset += 4;
+        return value;
     }
 }

@@ -1,6 +1,8 @@
 import { logger } from "../core/logger";
 import { Connection, ConnectionMessage, Service } from "./common";
-import { hostProtocolBuilder, HostProtocolParser, HostProtocol, HostParseResult } from "./host-protocol";
+import {
+    hostProtocolBuilder, hostReplyBuilder, hostReplyErrorBuilder, HostProtocolParser, HostProtocol, HostParseResult,
+} from "./protocol/host-protocol";
 import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 
 
@@ -9,6 +11,8 @@ export type HostServiceEvents = {
     error: (message: string) => void;
     exectime: (time: number) => void;
     loadtime: (time: number) => void;
+    send: (dst: string, tag: string, value: number) => void;
+    receive: (src: string, tag: string) => void;
 }
 
 export class HostService extends Service<HostServiceEvents, string> {
@@ -41,10 +45,23 @@ export class HostService extends Service<HostServiceEvents, string> {
         await this.send('execute', [line]);
         return new Promise<number>((resolve) => {
             this.on('exectime', (time) => {
-                resolve(time);
+                // A runtime error is written to stderr just before the exectime on stdout,
+                // but the two pipes are read independently. Waiting one turn of the event
+                // loop lets the error be reported before the caller treats the run as done.
+                setImmediate(() => resolve(time));
                 this.off('exectime');
             });
         });
+    }
+
+    /** Answers the program's pending `sendInteger` or `receiveInteger`. */
+    public async reply(value: number): Promise<void> {
+        await this.send('reply', [hostReplyBuilder(value)]);
+    }
+
+    /** Makes the program's pending `sendInteger` or `receiveInteger` throw. */
+    public async replyError(reason: string): Promise<void> {
+        await this.send('replyError', [hostReplyErrorBuilder(reason)]);
     }
 }
 
@@ -87,6 +104,12 @@ class HostMessageQueue {
                     break;
                 case HostProtocol.Loadtime:
                     this.service.handleMessage('loadtime', [message.time]);
+                    break;
+                case HostProtocol.Send:
+                    this.service.handleMessage('send', [message.dst, message.tag, message.value]);
+                    break;
+                case HostProtocol.Receive:
+                    this.service.handleMessage('receive', [message.src, message.tag]);
                     break;
                 default:
                     throw new Error("Unexpected error.");

@@ -47,6 +47,22 @@ void print_message(value_t m) {
     }
 }
 
+static char messaging_error[256];
+
+void send_integer(value_t dst, value_t tag, int32_t value) {
+    if (bs_comm_send_integer(gc_string_to_cstr(dst), gc_string_to_cstr(tag), value,
+                             messaging_error, sizeof(messaging_error)) < 0)
+        runtime_error(messaging_error);
+}
+
+int32_t receive_integer(value_t src, value_t tag) {
+    int32_t value = 0;
+    if (bs_comm_receive_integer(gc_string_to_cstr(src), gc_string_to_cstr(tag), &value,
+                                messaging_error, sizeof(messaging_error)) < 0)
+        runtime_error(messaging_error);
+    return value;
+}
+
 static float get_time_ms() {
 #ifndef _WIN32
     static struct timespec ts0 = { 0, -1 };
@@ -72,6 +88,17 @@ static float get_time_ms() {
 
 function print(message: any) {
     code`print_message(${message});`
+}
+
+// Messages between the projects in a workspace (see `bscript workspace run`).
+function sendInteger(dst: string, tag: string, value: integer) {
+    code`send_integer(${dst}, ${tag}, ${value});`
+}
+
+function receiveInteger(src: string, tag: string): integer {
+    let value: integer = 0
+    code`${value} = receive_integer(${src}, ${tag});`
+    return value
 }
 
 class Console {

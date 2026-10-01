@@ -11,6 +11,7 @@
 #include <windows.h>
 #endif
 
+
 void send_message(const char* format, ...) {
   static char message[MAX_LINE_SIZE];
   va_list list;
@@ -42,6 +43,21 @@ void print_message(value_t m) {
     }
 }
 
+static char messaging_error[256];
+
+void send_integer(value_t dst, value_t tag, int32_t value) {
+    if (bs_comm_send_integer(gc_string_to_cstr(dst), gc_string_to_cstr(tag), value,
+                             messaging_error, sizeof(messaging_error)) < 0)
+        runtime_error(messaging_error);
+}
+
+int32_t receive_integer(value_t src, value_t tag) {
+    int32_t value = 0;
+    if (bs_comm_receive_integer(gc_string_to_cstr(src), gc_string_to_cstr(tag), &value,
+                                messaging_error, sizeof(messaging_error)) < 0)
+        runtime_error(messaging_error);
+    return value;
+}
 
 static float get_time_ms() {
 #ifndef _WIN32
@@ -65,8 +81,9 @@ static float get_time_ms() {
 #endif
 }
 
-
 extern struct func_body _print;
+extern struct func_body _sendInteger;
+extern struct func_body _receiveInteger;
 void mth_0_Console(value_t self, value_t _message);
 void mth_1_Console(value_t self, value_t _message);
 float mth_0_Time(value_t self);
@@ -97,6 +114,31 @@ static void fbody_print(value_t self, value_t _message) {
 }
 struct func_body _print = { fbody_print, "(a)v" };
 
+static void fbody_sendInteger(value_t self, value_t _dst, value_t _tag, int32_t _value) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _dst;
+  func_rootset.values[1] = _tag;
+  {
+    send_integer(func_rootset.values[0], func_rootset.values[1], _value);;
+  }
+  DELETE_ROOT_SET(func_rootset)
+}
+struct func_body _sendInteger = { fbody_sendInteger, "(ssi)v" };
+
+static int32_t fbody_receiveInteger(value_t self, value_t _src, value_t _tag) {
+  ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
+  func_rootset.values[2] = self;
+  func_rootset.values[0] = _src;
+  func_rootset.values[1] = _tag;
+  {
+    int32_t _value = 0;
+    _value = receive_integer(func_rootset.values[0], func_rootset.values[1]);;
+    { int32_t ret_value_ = (_value); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+struct func_body _receiveInteger = { fbody_receiveInteger, "(ss)i" };
+
 void mth_0_Console(value_t self, value_t _message) {
   ROOT_SET_N(func_rootset,2,VALUE_UNDEF_2)
   func_rootset.values[0] = self;
@@ -125,8 +167,7 @@ float mth_0_Time(value_t self) {
   func_rootset.values[0] = self;
   {
     int32_t _t = 0;
-        _t = get_time_ms();
-        ;
+    _t = get_time_ms();;
     { float ret_value_ = (_t); DELETE_ROOT_SET(func_rootset); return ret_value_; }
   }
 }
