@@ -3,24 +3,25 @@ import { terminal } from '../terminal';
 import { LineBuffer } from './line-buffer';
 import { ProgramOutput } from './program-output';
 
-const TAG_COLORS = [chalk.cyan, chalk.magenta, chalk.yellow, chalk.green, chalk.blue];
-
-/** Builds a colored `[name]` tag for each name, padded to the longest name. */
+/** Builds a `[name]` tag for each name, padded to the longest name. */
 export function createTags(names: readonly string[]): Map<string, string> {
     const width = Math.max(0, ...names.map((name) => name.length));
-    return new Map(names.map((name, i) =>
-        [name, TAG_COLORS[i % TAG_COLORS.length](`[${name.padEnd(width)}]`)]));
+    return new Map(names.map((name) => [name, `[${name.padEnd(width)}]`]));
 }
 
 /**
  * Prints program output line by line, each line prefixed with `tag` if given.
  * Text is buffered until a newline arrives, separately for normal output and errors.
+ * Each finished line goes to `printLine`, which writes it to the terminal by default.
  */
 export class LineOutput implements ProgramOutput {
     private readonly out = new LineBuffer();
     private readonly err = new LineBuffer();
 
-    constructor(private readonly tag?: string) {}
+    constructor(
+        private readonly tag?: string,
+        private readonly printLine: (line: string) => void = (line) => terminal.writeLine(line),
+    ) {}
 
     write(message: string): void {
         for (const line of this.out.push(message)) {
@@ -47,11 +48,7 @@ export class LineOutput implements ProgramOutput {
     }
 
     private print(line: string) {
-        if (this.tag) {
-            terminal.writeLine(this.tag, line);
-        } else {
-            terminal.writeLine(line);
-        }
+        this.printLine(this.tag ? `${this.tag} ${line}` : line);
     }
 
     private printError(line: string) {

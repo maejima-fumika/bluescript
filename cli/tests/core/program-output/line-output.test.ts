@@ -5,11 +5,11 @@ const ANSI_PATTERN = /\u001b\[[0-9;]*m/g;
 const stripAnsi = (text: string) => text.replace(ANSI_PATTERN, '');
 
 describe('createTags', () => {
-    it('pads every tag to the longest name', () => {
+    it('pads every tag to the longest name, without color', () => {
         const tags = createTags(['sensor', 'sim']);
 
-        expect(stripAnsi(tags.get('sensor')!)).toBe('[sensor]');
-        expect(stripAnsi(tags.get('sim')!)).toBe('[sim   ]');
+        expect(tags.get('sensor')).toBe('[sensor]');
+        expect(tags.get('sim')).toBe('[sim   ]');
     });
 });
 
@@ -97,5 +97,18 @@ describe('LineOutput without a tag', () => {
         output.flush();
 
         expect(printedLines()).toEqual(['failed', 'no newline']);
+    });
+});
+
+describe('LineOutput with a custom printer', () => {
+    it('passes each finished line, with the tag, to the printer', () => {
+        const lines: string[] = [];
+        const output = new LineOutput('[a]', (line) => lines.push(stripAnsi(line)));
+
+        output.write('first\nsec');
+        output.writeError('oops\n');
+        output.flush();
+
+        expect(lines).toEqual(['[a] first', '[a] oops', '[a] sec']);
     });
 });

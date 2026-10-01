@@ -236,15 +236,42 @@ bscript workspace run [project-names...]
 **Arguments:**
 *   `[project-names...]`: Names of the projects to run. If omitted, every project in the workspace runs.
 
-The CLI connects to every board, compiles and loads each project, and then starts all of the programs together. Each line of program output is prefixed with the project name:
+The CLI connects to every board, compiles and loads each project, and then starts all of the programs together. While it prepares the projects, it shows one line per project, updated in place:
 
 ```
+[sensor  ] ✔ connect  ✔ init  ✔ compile  … load 42%
+[sim     ] ✔ connect  ✔ init  ✔ compile  · load
+[actuator] ✔ connect  ✔ init  … compile  · load
+```
+
+While the programs run, the screen is split into three parts: the messages so far stay at the top, the program output scrolls in the area between the two lines, and the bottom shows the state of each project. Each line of program output is prefixed with the project name:
+
+```
+INFO: Workspace demo: sensor (esp32, BLUESCRIPT), sim (host), actuator (esp32, BS-A)
+[sensor  ] ✔ connect  ✔ init  ✔ compile  ✔ load
+[sim     ] ✔ connect  ✔ init  ✔ compile  ✔ load
+[actuator] ✔ connect  ✔ init  ✔ compile  ✔ load
+INFO: Start executing programs. Type 'Ctrl-D' to exit.
+── view: all ──────────────────────────────────────────────────
 [sensor  ] temp=24.1
 [sim     ] step 1
 [actuator] motor on
+
+───────────────────────────────────────────────────────────────
+ 1 [sensor  ] ● running   2 [sim     ] ✔ finished   3 [actuator] ● running
+ 1-3: focus  Tab: next  a: all  Ctrl-D: exit
 ```
 
-If any project fails before execution (for example, a compile error or a board that cannot be found), no program is started. After execution starts, a board that disconnects is reported and the other projects keep running. The command ends when every program has finished, or when you type `Ctrl-D`.
+| Key | Action |
+| :--- | :--- |
+| `1`-`9` | Show only the output of that project in the output area, starting with its recent lines. |
+| `Tab` | Show only the output of the next project. |
+| `a` | Show the output of every project again, starting with the recent lines of every project in the order they arrived. |
+| `Ctrl-D` | Stop and exit. |
+
+The top and the bottom stay in place; only the output area changes when you switch. The output area shows program output only: whether each project has finished or disconnected is shown at the bottom, and error messages from the CLI are printed below the screen when the command ends. When every program has finished, or when you type `Ctrl-D`, the output area switches back to every project and the screen is left as it is. Projects that were still running when you typed `Ctrl-D` are shown as `■ stopped`. When the output is not a terminal (for example, piped to a file), or the terminal is too short, the screen is not split: the steps and the output of every project are printed line by line.
+
+If any project fails before execution (for example, a compile error or a board that cannot be found), no program is started. After execution starts, a board that disconnects is reported and the other projects keep running; a board that disconnects after its program has finished is not reported. In a terminal, the command keeps running after every program has finished, so that you can still switch between the outputs, and ends when you type `Ctrl-D`. When the keys cannot be used (for example, when the output is piped), the command ends when every program has finished.
 
 The programs can exchange values (integers, floats, booleans, strings, null and arrays) with the built-in functions such as `sendInteger`, `broadcastString` and `receiveFloatArray` (see [Messages Between Projects](./libraries/builtin.md#messages-between-projects)). The programs never talk to each other directly: every message goes through the CLI, over the same connection that is used for program output. For example, with a workspace containing the projects `controller` and `actuator`:
 

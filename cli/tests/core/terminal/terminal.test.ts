@@ -59,6 +59,106 @@ describe('Terminal', () => {
         });
     });
 
+    describe('footer', () => {
+        it('is redrawn below each line written', () => {
+            const stdout = createStdout(true);
+            const terminal = new Terminal(createStdin(false), stdout.stream);
+
+            terminal.setFooter('footer');
+            terminal.writeLine('a');
+            terminal.writeLine('b');
+
+            const text = stdout.text();
+            expect(text.endsWith('b\nfooter')).toBe(true);
+            expect(text.indexOf('a\n')).toBeLessThan(text.indexOf('b\n'));
+            expect(text.split('footer')).toHaveLength(4);
+        });
+
+        it('is replaced by a new footer', () => {
+            const stdout = createStdout(true);
+            const terminal = new Terminal(createStdin(false), stdout.stream);
+
+            terminal.setFooter('old');
+            terminal.setFooter('new');
+            terminal.writeLine('a');
+
+            expect(stdout.text().endsWith('a\nnew')).toBe(true);
+            expect(stdout.text().lastIndexOf('old')).toBeLessThan(stdout.text().indexOf('a\n'));
+        });
+
+        it('is removed by clearFooter', () => {
+            const stdout = createStdout(true);
+            const terminal = new Terminal(createStdin(false), stdout.stream);
+
+            terminal.setFooter('footer');
+            terminal.clearFooter();
+            terminal.writeLine('a');
+
+            expect(stdout.text().endsWith('a\n')).toBe(true);
+            expect(stdout.text().split('footer')).toHaveLength(2);
+        });
+
+        it('is left as ordinary output by clearFooter with keep', () => {
+            const stdout = createStdout(true);
+            const terminal = new Terminal(createStdin(false), stdout.stream);
+
+            terminal.setFooter('footer');
+            terminal.clearFooter({ keep: true });
+            terminal.writeLine('a');
+
+            expect(stdout.text()).toBe('footer\na\n');
+        });
+
+        it('is not shown when stdout is not a TTY', () => {
+            const stdout = createStdout(false);
+            const terminal = new Terminal(createStdin(false), stdout.stream);
+
+            expect(terminal.supportsFooter).toBe(false);
+            terminal.setFooter('footer');
+            terminal.writeLine('a');
+            terminal.clearFooter({ keep: true });
+
+            expect(stdout.text()).toBe('a\n');
+        });
+    });
+
+    describe('intercept', () => {
+        it('passes written text to the handler instead of stdout until disposed', () => {
+            const stdout = createStdout(true);
+            const terminal = new Terminal(createStdin(false), stdout.stream);
+            const handler = jest.fn();
+
+            const dispose = terminal.intercept(handler);
+            terminal.writeLine('a', 'b');
+            terminal.write('c');
+            dispose();
+            terminal.writeLine('d');
+
+            expect(handler.mock.calls).toEqual([['a b\n'], ['c']]);
+            expect(stdout.text()).toBe('d\n');
+        });
+
+        it('cannot be used twice at the same time', () => {
+            const terminal = new Terminal(createStdin(false), createStdout().stream);
+
+            const dispose = terminal.intercept(() => {});
+            expect(() => terminal.intercept(() => {})).toThrow('already intercepted');
+            dispose();
+            terminal.intercept(() => {})();
+        });
+
+        it('does not affect the screen', () => {
+            const stdout = createStdout(true);
+            const terminal = new Terminal(createStdin(false), stdout.stream);
+
+            const dispose = terminal.intercept(() => {});
+            terminal.screen.writeLine('log');
+            dispose();
+
+            expect(stdout.text()).toBe('log\n');
+        });
+    });
+
     describe('readLines', () => {
         it('handles lines one at a time and resolves after the current line on close', async () => {
             const terminal = new Terminal(createStdin(false), createStdout().stream);
@@ -176,6 +276,24 @@ describe('Terminal', () => {
             expect(stdin.setRawMode).toHaveBeenLastCalledWith(false);
             stdin.write('\x04');
             await flush();
+            expect(onCtrlD).toHaveBeenCalledTimes(1);
+        });
+
+        it('passes other keys to onKey', async () => {
+            const stdin = createStdin(true);
+            const terminal = new Terminal(stdin, createStdout().stream);
+            const onKey = jest.fn();
+            const onCtrlD = jest.fn();
+
+            const dispose = terminal.listenKeys({ onCtrlD, onKey });
+            stdin.write('1');
+            stdin.write('\t');
+            stdin.write('a');
+            stdin.write('\x04');
+            await flush();
+            dispose();
+
+            expect(onKey.mock.calls).toEqual([['1'], ['\t'], ['a']]);
             expect(onCtrlD).toHaveBeenCalledTimes(1);
         });
 

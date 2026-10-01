@@ -1,5 +1,16 @@
 import readline from 'readline';
 
+const ANSI_PATTERN = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+
+/** Returns how many terminal rows `text` takes when lines wrap at `columns`. */
+export function countRows(text: string, columns: number): number {
+    let rows = 0;
+    for (const line of text.split('\n')) {
+        rows += Math.max(1, Math.ceil(line.replace(ANSI_PATTERN, '').length / columns));
+    }
+    return rows;
+}
+
 /** A line at the bottom of the terminal that can be rewritten in place, such as a progress message. */
 export class StatusLine {
     private stream: NodeJS.WriteStream;
@@ -36,7 +47,7 @@ export class StatusLine {
         if (!this.isUpdating) {
             return;
         }
-        const lines = this.getLineCount(this.lastOutput);
+        const lines = countRows(this.lastOutput, this.stream.columns || 80);
         for (let i = 0; i < lines; i++) {
             if (i > 0) {
                 readline.moveCursor(this.stream, 0, -1);
@@ -46,15 +57,5 @@ export class StatusLine {
         }
         this.isUpdating = false;
         this.lastOutput = '';
-    }
-
-    private getLineCount(str: string): number {
-        const columns = this.stream.columns || 80;
-        let lineCount = 0;
-        for (const line of str.split('\n')) {
-            const strippedLine = line.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
-            lineCount += Math.max(1, Math.ceil(strippedLine.length / columns));
-        }
-        return lineCount;
     }
 }

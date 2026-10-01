@@ -104,16 +104,29 @@ export function mockProcessExit() {
         .mockImplementation((() => {}) as (code?: number | string | null | undefined) => never);
 }
 
+/**
+ * Captures what is written to stdout. stdout is treated as not a TTY meanwhile,
+ * so the output is plain lines even when jest runs in a terminal.
+ */
 export function captureStdout() {
     const chunks: string[] = [];
     const spy = jest.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
         chunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
         return true;
     });
+    const isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true, writable: true });
 
     return {
         text: () => chunks.join(''),
-        restore: () => spy.mockRestore(),
+        restore: () => {
+            spy.mockRestore();
+            if (isTTYDescriptor) {
+                Object.defineProperty(process.stdout, 'isTTY', isTTYDescriptor);
+            } else {
+                delete (process.stdout as { isTTY?: boolean }).isTTY;
+            }
+        },
     };
 }
 

@@ -1,16 +1,25 @@
 import { Command } from "commander";
 import * as os from 'os';
 import { CompileOutput } from "@bscript/lang";
-import { logger, runStep, formatStepResult } from "../../core/logger";
+import { logger, INFO_PREFIX, ProgressTable, ProgressPhase } from "../../core/logger";
 import { LineOutput, createTags } from "../../core/program-output";
 import { cwd } from "../../core/command-exec";
 import { settleAll } from "../../core/async";
-import { terminal } from "../../core/terminal";
+import { terminal, OutputView } from "../../core/terminal";
 import { DEFAULT_DEVICE_NAME } from "../../config/project-config";
 import { WorkspaceConfigHandler, WorkspaceProject } from "../../config/workspace-config";
 import { ProjectSession, SessionDisconnectedError } from "../../platforms/project-session";
 import { MessageRouter } from "../../platforms/messaging";
 import { CommandHandlerWithUpdateCheck } from "../command";
+
+const START_MESSAGE = "Start executing programs. Type 'Ctrl-D' to exit.";
+
+const PHASES = {
+    connect: { name: 'connect', label: 'Connecting...' },
+    initialize: { name: 'init', label: 'Initializing...' },
+    compile: { name: 'compile', label: 'Compiling...' },
+    load: { name: 'load', label: 'Loading...' },
+} satisfies Record<string, ProgressPhase>;
 
 type Member = {
     name: string;
@@ -23,7 +32,11 @@ type Member = {
 class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
     private members: Member[] = [];
     private router?: MessageRouter;
+    private progress?: ProgressTable;
+    private view?: OutputView;
+    private summary = '';
     private readonly failed = new Set<string>();
+    private readonly finished = new Set<string>();
 
     constructor(
         private workspaceConfigHandler: WorkspaceConfigHandler,
@@ -35,19 +48,19 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
     /** @returns true when every project finished without failing or disconnecting. */
     async run(): Promise<boolean> {
         this.setup();
-        // ESP32 boards connect one at a time (see BleConnection); host projects connect in parallel.
-        await this.runPhase('Connecting...', 'connect', (m) => m.session.connect());
-        await this.runPhase('Initializing...', 'initialize', (m) => m.session.prepare());
-        await this.runPhase('Compiling...', 'compile', async (m) => {
-            m.compileOutput = await m.session.build();
-        }, os.cpus().length);
-        await this.loadAll();
+        try {
+            // ESP32 boards connect one at a time (see BleConnection); host projects connect in parallel.
+            await this.runPhase(PHASES.connect, 'connect', (m) => m.session.connect());
+            await this.runPhase(PHASES.initialize, 'initialize', (m) => m.session.prepare());
+            await this.runPhase(PHASES.compile, 'compile', async (m) => {
+                m.compileOutput = await m.session.build();
+            }, os.cpus().length);
+            await this.loadAll();
+        } finally {
+            this.progress?.finish();
+        }
         // Every project is loaded at this point, so they can all start together.
         await this.executeAll();
-
-        if (this.failed.size > 0) {
-            logger.error(`Some projects did not finish successfully: ${[...this.failed].join(', ')}`);
-        }
         return this.failed.size === 0;
     }
 
@@ -71,24 +84,36 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
             (dst, message) => sessions.get(dst)?.canReceiveMessage(message) ?? false,
         );
         this.router = router;
+        const rows = projects.map((p) => ({ name: p.name, tag: tags.get(p.name)! }));
+        const view = new OutputView(rows);
+        this.view = view;
 
         this.members = projects.map((p) => {
             const tag = tags.get(p.name)!;
-            const output = new LineOutput(tag);
+            const output = new LineOutput(tag, view.printerFor(p.name));
             const session = new ProjectSession(p.project, this.globalConfigHandler, output, p.deviceName);
             sessions.set(p.name, session);
             session.setMessagePort(router.portFor(p.name));
             session.on('disconnected', () => {
+                // A board that is turned off after its program has finished is not a failure.
+                if (this.finished.has(p.name)) {
+                    return;
+                }
                 router.close(p.name);
                 this.failed.add(p.name);
+                view.setState(p.name, 'disconnected');
                 output.flush();
-                logger.error(tag, 'Disconnected.');
+                // While the screen is split, the footer already shows it.
+                if (!view.isOpen) {
+                    logger.error(tag, 'Disconnected.');
+                }
             });
             return { name: p.name, tag, session, output };
         });
 
-        const summary = projects.map(describeProject).join(', ');
-        logger.info(`Workspace ${this.workspaceConfigHandler.name}: ${summary}`);
+        this.summary = `Workspace ${this.workspaceConfigHandler.name}: ${projects.map(describeProject).join(', ')}`;
+        logger.info(this.summary);
+        this.progress = new ProgressTable(rows, Object.values(PHASES));
     }
 
     /**
@@ -96,17 +121,20 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
      * rest to settle and then throws, so nothing is still in flight on close.
      */
     private async runPhase(
-        label: string,
+        phase: ProgressPhase,
         verb: string,
         action: (member: Member) => Promise<void>,
         concurrency?: number,
     ) {
+        const progress = this.progress!;
         const results = await settleAll(this.members, async (m) => {
+            progress.start(m.name, phase.name);
             try {
                 await action(m);
-                logger.info(m.tag, formatStepResult(label, 'ok'));
+                progress.succeed(m.name, phase.name);
             } catch (error) {
-                logger.info(m.tag, formatStepResult(label, 'failed'));
+                progress.fail(m.name, phase.name);
+                logger.error(m.tag, `Failed to ${verb}.`);
                 logger.showError(error, 4);
                 throw error;
             }
@@ -120,37 +148,57 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
 
     /** One at a time, so the boards do not compete for the Bluetooth bandwidth. */
     private async loadAll() {
+        const progress = this.progress!;
+        const phase = PHASES.load.name;
         for (const m of this.members) {
+            progress.start(m.name, phase);
             try {
-                await runStep(`${m.tag} Loading...`, (step) =>
-                    m.session.load(m.compileOutput!, (percent) => step.progress(`${percent}%`)));
+                await m.session.load(m.compileOutput!, (percent) => progress.start(m.name, phase, `${percent}%`));
+                progress.succeed(m.name, phase);
             } catch (error) {
+                progress.fail(m.name, phase);
                 throw new Error(`Failed to load ${m.name}.`, { cause: error });
             }
         }
     }
 
-    /** Ends when every program has finished or disconnected, or when Ctrl-D is typed. */
+    /**
+     * Ends when Ctrl-D is typed. Meanwhile the messages so far stay at the top of
+     * the screen, the footer shows each program's state, and keys choose whose
+     * output is shown, also after every program has finished.
+     * When keys cannot be used, it ends as soon as every program has finished or disconnected.
+     */
     private async executeAll() {
-        logger.info("Start executing programs. Type 'Ctrl-D' to exit.");
+        const view = this.view!;
+        logger.info(START_MESSAGE);
         let requestStop!: () => void;
         const stopRequested = new Promise<void>((resolve) => {
             requestStop = resolve;
         });
         const disposeControlKeys = terminal.listenKeys({
-            onCtrlC: () => process.exit(0),
+            onCtrlC: () => {
+                view.stop();
+                process.exit(0);
+            },
             onCtrlD: () => requestStop(),
+            onKey: (char) => view.handleKey(char),
         });
 
+        view.start([`${INFO_PREFIX} ${this.summary}`, this.progress!.render(), `${INFO_PREFIX} ${START_MESSAGE}`]);
         try {
             // Send every execute command in the same tick so the programs start as close together as possible.
             const running = this.members.map((m) => this.executeOne(m));
-            await Promise.race([Promise.all(running), stopRequested]);
+            if (view.isOpen && terminal.isInteractive) {
+                await stopRequested;
+            } else {
+                await Promise.race([Promise.all(running), stopRequested]);
+            }
         } finally {
             disposeControlKeys();
             for (const m of this.members) {
                 m.output.flush();
             }
+            view.stop();
         }
     }
 
@@ -158,14 +206,20 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
     private async executeOne(m: Member) {
         try {
             await m.session.execute(m.compileOutput!);
+            this.finished.add(m.name);
             this.router?.close(m.name);
             m.output.flush();
-            logger.success(m.tag, 'Finished.');
+            this.view?.setState(m.name, 'finished');
+            // While the screen is split, the footer already shows it.
+            if (!this.view?.isOpen) {
+                logger.success(m.tag, 'Finished.');
+            }
         } catch (error) {
             this.router?.close(m.name);
             this.failed.add(m.name);
             // A disconnection is already reported by the 'disconnected' listener.
             if (!(error instanceof SessionDisconnectedError)) {
+                this.view?.setState(m.name, 'failed');
                 m.output.flush();
                 logger.error(m.tag, 'Execution failed.');
                 logger.showError(error, 4);

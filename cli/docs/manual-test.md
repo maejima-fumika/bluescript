@@ -696,20 +696,22 @@ Each item has an ID for bug reports and test records. Record pass/fail in the [t
 
 - **Priority:** P0 · **Requires:** host
 - **Steps:** Add two host projects that print output, then run `bscript workspace run`
-- **Expected:** Steps Connecting → Initializing → Compiling → Loading are shown per project; every output line starts with `[project-name]`; exit code `0`
+- **Expected:** One line per project shows connect → init → compile → load, updated in place and left on screen when loading is done; every output line starts with `[project-name]`; while running, the messages up to `Start executing programs.` stay at the top, the output scrolls only between the two `───` lines, and the bottom shows `● running` for each project, changing to `✔ finished`; after every program has finished, the command keeps running and `1`-`9` / `Tab` / `a` still switch the output; after `Ctrl-D`, the screen is left as it was without the key help and the shell prompt appears below it; exit code `0`
+- **Variation (not a TTY):** Run `bscript workspace run | cat`. Expected: no footer and no in-place updates; `[name] Connecting... OK` etc. are printed line by line for each project; the command ends by itself when every program has finished
+- **Variation (resize):** Make the terminal shorter and taller while running. Expected: the screen is laid out again (the top messages give way first); when it is too short (fewer than about 9 rows), the output continues as plain lines
 
 #### MT-WS-05: Run two ESP32 boards and a host project
 
 - **Priority:** P0 · **Requires:** esp32 (two boards) + host
 - **Precondition:** Two boards flashed with different names (`bscript board flash-runtime esp32 -d BS-A` / `-d BS-B`); both added with matching `-d`
 - **Steps:** Run `bscript workspace run`
-- **Expected:** Both boards connect (one after the other) without timing out; output from all three projects appears with prefixes; Ctrl-D exits and disconnects every board
+- **Expected:** Both boards connect (one after the other) without timing out; the progress lines show the load percentage of each board in turn; output from all three projects appears with prefixes; Ctrl-D exits and disconnects every board
 
 #### MT-WS-06: Board disconnects during run
 
 - **Priority:** P1 · **Requires:** esp32 (two boards)
 - **Steps:** While MT-WS-05 is running a long program, power off one board
-- **Expected:** `[name] Disconnected.` is shown; the other projects keep running; after Ctrl-D, exit code is `1`
+- **Expected:** The bottom shows `✖ disconnected` for the board (in a terminal; without a TTY, `[name] Disconnected.` is printed); the other projects keep running; after Ctrl-D, the projects still running show `■ stopped`, no summary error is printed, and the exit code is `1`
 
 #### MT-WS-07: Failure before execution
 
@@ -742,6 +744,12 @@ Each item has an ID for bug reports and test records. Record pass/fail in the [t
 - **Priority:** P2 · **Requires:** esp32 (two boards)
 - **Steps:** (1) Board A calls `receiveInteger("<board-B>", "t")` while board B only prints. (2) Both boards call `receiveInteger` on each other. (3) Board A calls `sendInteger("missing", "t", 1)`. (4) Board A calls `sendInteger("<board-A>", "t", 1)`; run again with `receiveInteger("<board-A>", "t")` instead. (5) `bscript project run` a project that calls `sendInteger`. (6) Board A calls `sendInteger` with a 250-character `dst` and a 250-character `tag`. (7) The host sends `sendFloat("<board-A>", "t", 1.5)` and board A calls `receiveInteger("<host>", "t")`. (8) The host sends an `integer[]` of 200 elements to board A. (9) Board A calls `sendArray` with an `any[]` that holds another array
 - **Expected:** Short messages: (1) Board A shows `** runtime error: <board-B> finished`. (2) Both boards show `** runtime error: deadlock`. (3) `** runtime error: no project missing`. (4) `** runtime error: send to self`, then `** runtime error: receive from self` on the second run. (5) `** runtime error: not in workspace`. (6) `** runtime error: request too long` right away, instead of hanging. (7) Board A shows `** runtime error: type mismatch`. (8) The host shows `** runtime error: Cannot send to <board-A>: an integer[] of this size is too large ...`, and board A receives nothing. (9) Board A shows `** runtime error: unsupported element`. In every case the statements after the failing call do not run, and the boards stay connected
+
+#### MT-WS-12: Focus on one project while running
+
+- **Priority:** P1 · **Requires:** host (two or three projects that keep printing, such as a long loop with `console.log`)
+- **Steps:** Run `bscript workspace run`. While the programs run, press `2`, then `Tab`, then `a`, then `9` (with fewer than nine projects), then `Ctrl-D`
+- **Expected:** `2`: only the area between the `───` lines changes: it is filled with that project's recent lines, and from then on only its output is shown; the upper line shows `view: <project 2>` and the bottom highlights it; the top messages and the bottom stay in place. `Tab`: the same for the next project. `a`: the area is redrawn with the recent lines of every project in the order they arrived; every project's output is shown again. `9`: nothing happens. The area never shows `Finished.` or `Disconnected.` (the bottom shows `✔ finished` / `✖ disconnected` instead). `Ctrl-D` exits: the area switches back to every project (`view: all`), the projects still running show `■ stopped`, the key help is removed and the cursor is visible again. Project tags such as `[name]` have no color
 
 ---
 
@@ -825,7 +833,7 @@ Jest **unit** tests in `cli/tests/` mock filesystem, network, and device I/O. **
 | `project run` | Handler wiring | Normal run; built-in; functions/variables; local import; local package import; inline C; `.c` / `.h` includes; compile error (`run.host.test.ts`) | Ctrl-D / TTY; `--with-repl`; `--with-notebook`; ESP32; BLE connect by `deviceName`; device name mismatch errors; real `project install` packages |
 | `repl` | — | Entry line; built-in; variable/function persistence; compile-error recovery (`repl.host.test.ts`) | Interactive session; ESP32; BLE connect by `-d`; device name mismatch errors; global REPL without mocked readline |
 | `workspace create` / `add` / `remove` | File generation; path normalization; duplicate name / path / `deviceName` checks; remove by path | — | — |
-| `workspace run` | BLE connections run one at a time (`ble-connect-lock.test.ts`) | Two host projects with prefixed output; subset by name; compile error stops everything; unknown name (`workspace/run.host.test.ts`) | Ctrl-D / TTY; multiple ESP32 boards; disconnect during run |
+| `workspace run` | BLE connections run one at a time (`ble-connect-lock.test.ts`); progress lines (`progress-table.test.ts`); split screen and focus keys (`output-view.test.ts`, `split-screen.test.ts`, `terminal.test.ts`) | Two host projects with prefixed output; subset by name; compile error stops everything; unknown name (`workspace/run.host.test.ts`) | Ctrl-D / TTY; split screen and focus keys in a real terminal (MT-WS-12); multiple ESP32 boards; disconnect during run |
 | WebSocket / device protocol | Unit tests | — | Browser Notebook integration |
 | Global help / version | — | — | Quick smoke items |
 
