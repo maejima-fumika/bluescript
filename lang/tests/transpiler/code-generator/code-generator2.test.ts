@@ -283,6 +283,88 @@ print(barbar(7))
   expect(importAndCompileAndRun(src, imp.importer(), imp.init(), imp.files(), imp.path)).toBe('8\n')
 })
 
+test('import declaration with alias', () => {
+  const modules = [
+    { name: 'foo', source: `
+  export const foobaz = 3
+  export let count = 0
+  export function inc() { count += 1 }
+` },
+    { name: 'bar', source: `
+  export function barf(x: integer) { return x + 10 }
+  export let bar = (a: integer) => a * 2
+` }]
+
+  const src = `
+import { foobaz as fb, count as c, inc as increment } from 'foo'
+import { barf as f, bar as b } from 'bar'
+print(fb)
+increment()
+increment()
+print(c)
+print(f(5))
+print(b(4))
+`
+  const imp = new Importer(modules)
+  expect(importAndCompileAndRun(src, imp.importer(), imp.init(), imp.files(), imp.path)).toBe('3\n2\n15\n8\n')
+
+  const src2 = `
+import { barf as f } from 'bar'
+function barf(x: integer) { return x }
+print(f(5))
+print(barf(5))
+`
+  imp.reset()
+  expect(importAndCompileAndRun(src2, imp.importer(), imp.init(), imp.files(), imp.path)).toBe('15\n5\n')
+
+  const src3 = `
+import { barf as f } from 'bar'
+print(barf(5))
+`
+  imp.reset()
+  expect(() => importAndCompileAndRun(src3, imp.importer(), imp.init(), imp.files(), imp.path)).toThrow(/unknown name: barf/)
+
+  const src4 = `
+import { barf2 as f } from 'bar'
+print(f(5))
+`
+  imp.reset()
+  expect(() => importAndCompileAndRun(src4, imp.importer(), imp.init(), imp.files(), imp.path)).toThrow(/'barf2' is not found in bar/)
+})
+
+test('import a class with alias', () => {
+  const modules = [
+    { name: 'foo', source: `
+  export class Foo {
+    value: string
+    constructor(s: string) { this.value = s }
+    get() { return this.value }
+  }
+` },
+    { name: 'bar', source: `
+  export class Foo {
+    static k = 100
+    value: integer
+    constructor(i: integer) { this.value = i }
+    get() { return this.value }
+  }
+
+  export function bar(i: integer) { return new Foo(i) }
+` }]
+
+  const src = `
+import { Foo } from 'foo'
+import { Foo as Foo2, bar } from 'bar'
+const f: Foo2 = new Foo2(3)
+print(new Foo('ff').get())
+print(f.get())
+print(Foo2.k)
+print(bar(7) instanceof Foo2)
+`
+  const imp = new Importer(modules)
+  expect(importAndCompileAndRun(src, imp.importer(), imp.init(), imp.files(), imp.path)).toBe('ff\n3\n100\ntrue\n')
+})
+
 test('/ and /= operators', () => {
   const src = `
   let a = 239

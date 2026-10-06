@@ -61,7 +61,7 @@ export interface NameTableMaker<Info extends NameInfo> {
   block(parent: NameTable<Info>): NameTable<Info>
   function(parent: NameTable<Info>): FunctionNameTable<Info>
   info(t: StaticType): Info
-  globalInfo(t: StaticType): Info
+  globalInfo(t: StaticType, name: string): Info
   instanceType(name: string, superClass: ObjectType): InstanceType
 }
 
@@ -107,7 +107,7 @@ export abstract class GlobalNameTable<Info extends NameInfo> implements NameTabl
   record(key: string, t: StaticType, maker: NameTableMaker<Info>,
          init?: (i: Info) => void): boolean {
     const old = this.lookup(key)
-    const info = maker.globalInfo(t)
+    const info = maker.globalInfo(t, key)
     if (init !== undefined)
       init(info)
 
