@@ -263,6 +263,35 @@ test('import', () => {
   expect(() => tested.transpile(src5, 1, 'foo.ts', src4)).toThrow(/line 2.*foo\.ts\n.*line 3.*foo\.ts\n.*line 5/)
 })
 
+test('import with alias', () => {
+  const src = `
+  export function foo(): integer { return 1 }
+  export function bar(): integer { return 2 }
+  `
+  const src2 = `
+  import { foo as baz } from 'foo.ts'
+  function bar(): string { return 'bar' }
+  const a = baz()
+  const b = bar()
+  `
+
+  const src3 = `
+  import { foo as baz } from 'foo.ts'
+  const a = foo()
+  `
+
+  const ast = tested.transpile(src2, 1, 'foo.ts', src)
+  const table = names.getNameTable(ast.program)
+  const a = table?.lookup('a')?.type
+  const b = table?.lookup('b')?.type
+  expect(a).toBe(types.Integer)
+  expect(b).toBe(types.StringT)
+  expect(table?.lookup('baz')?.type).toBeInstanceOf(types.FunctionType)
+  expect(table?.lookup('foo')).toBeUndefined()
+
+  expect(() => tested.transpile(src3, 1, 'foo.ts', src)).toThrow(/unknown name: foo/)
+})
+
 test('InstanceType.subclasses() and ClassTable.roots()', () => {
   const src = `
   class Foo {}

@@ -12,6 +12,30 @@ This imports functions `abs` and `max` declared in the source file
 `./math.bs`.
 These functions must be declared with the `export` modifier.
 
+An imported name can be renamed by the `as` keyword.
+
+```tsx
+import { abs as absolute, max } from './math.bs'
+
+print(absolute(-3))
+```
+
+This imports the function `abs` under the name `absolute`.
+The original name `abs` is not available in the importing file,
+so it can be used for a different declaration.
+Renaming is useful to avoid name conflicts, for example,
+when two source files export classes with the same name.
+
+```tsx
+import { Point } from './geometry.bs'
+import { Point as GridPoint } from './grid.bs'
+
+const p: GridPoint = new GridPoint(1, 2)
+```
+
+Note that the namespace import such as `import * as math from './math.bs'`
+is not supported.
+
 Furthermore, the `import type` declaration is a valid syntax in BlueScript,
 but this declaration is ignored.
 

@@ -127,10 +127,13 @@ class FreeGlobalVariableInfo extends FreeVariableInfo {
 class GlobalVariableInfo extends VariableInfo {
   private rootSetName?: string
   private moduleId: string
+  private declaredName: string    // the name in the declaring module.  It may differ from
+                                  // the name used in another module, e.g. by import { a as b }.
 
-  constructor(t: StaticType, moduleId: string) {
+  constructor(t: StaticType, moduleId: string, declaredName: string) {
     super(t)
     this.moduleId = moduleId
+    this.declaredName = declaredName
   }
 
   override transpile(name: string) {
@@ -141,7 +144,7 @@ class GlobalVariableInfo extends VariableInfo {
   }
 
   override transpile0(name: string) {
-    return `_${this.moduleId}${name}`
+    return `_${this.moduleId}${this.declaredName}`
   }
 
   // set a rootset name and a rootset index
@@ -180,7 +183,7 @@ export class VariableNameTableMaker implements NameTableMaker<VariableInfo> {
   block(parent: NameTable<VariableInfo>) { return new BlockNameTable<VariableInfo>(parent) }
   function(parent: NameTable<VariableInfo>) { return new FunctionVarNameTable(parent) }
   info(t: StaticType) { return new VariableInfo(t) }
-  globalInfo(t: StaticType) { return new GlobalVariableInfo(t, this.moduleId) }
+  globalInfo(t: StaticType, name: string) { return new GlobalVariableInfo(t, this.moduleId, name) }
 
   instanceType(name: string, superClass: ObjectType) {
     return new InstanceType(`${this.moduleId}${name}`, name, superClass)

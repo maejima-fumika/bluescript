@@ -45,6 +45,23 @@ When you install an external library (like a driver), you import it by its **Pac
 import { GPIO } from "gpio";
 ```
 
+### Renaming Imports
+Use the `as` keyword to import a name under a different name.
+This is handy when two modules export the same name, or when the name conflicts with one in your file.
+
+```typescript
+import { add as addInt } from "./math-utils";
+
+console.log(addInt(10, 20));
+```
+
+After renaming, only the new name (`addInt`) is available in the importing file.
+
+:::warning No Namespace Imports
+`import * as utils from "./math-utils"` is not supported.
+List the names you need inside `{ }` instead.
+:::
+
 ## Including C and Header Files
 
 You can use local `.c` and `.h` files in your project via **Inline C** `#include` directives.

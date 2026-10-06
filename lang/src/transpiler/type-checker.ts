@@ -123,6 +123,7 @@ export default class TypeChecker<Info extends NameInfo> extends visitor.NodeVisi
     for (const spec of node.specifiers)
       if (AST.isImportSpecifier(spec) && AST.isIdentifier(spec.imported)) {
         const name = spec.imported.name
+        const localName = spec.local.name     // differs from name when "as" is used
         const info = imported.lookup(name)
         const sourceFile = node.source.value
         if (info === undefined) {
@@ -130,7 +131,7 @@ export default class TypeChecker<Info extends NameInfo> extends visitor.NodeVisi
         }
         else {
           this.assert(info.isExported, `'${name}' is declared but not exported in ${sourceFile}`, spec)
-          env.importInfo(name, info)
+          env.importInfo(localName, info)
           // import the class definition and give it a name including the module ID.
           // this is not necessary for type checking but for code generation.
           // See identifier() in CodeGenerator.
