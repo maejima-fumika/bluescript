@@ -111,6 +111,38 @@ console.log(time.now());
         exitSpy.mockRestore();
     });
 
+    it('measures elapsed time with performanceNow()', async () => {
+        const exitSpy = mockProcessExit();
+        const stdout = captureStdout();
+
+        createHostProject(currentProjectRoot, {
+            'src/index.bs': `
+const start = performanceNow();
+let sum = 0;
+for (let i = 0; i < 1000000; i++) {
+    sum = sum + i % 7;
+}
+const end = performanceNow();
+console.log("start=" + start);
+console.log("end=" + end);
+console.log(sum);
+            `.trim(),
+        }, HOST_INTEGRATION_RUNTIME_DIR);
+
+        await handleRunCommand({ withRepl: false, withNotebook: false });
+
+        expectExitCode(exitSpy, 0, stdout);
+        const start = Number(stdout.text().match(/start=([-\d.e+]+)/)?.[1]);
+        const end = Number(stdout.text().match(/end=([-\d.e+]+)/)?.[1]);
+        // The first call is the origin.
+        expect(start).toBeGreaterThanOrEqual(0);
+        expect(start).toBeLessThan(1);
+        expect(end).toBeGreaterThanOrEqual(start);
+
+        stdout.restore();
+        exitSpy.mockRestore();
+    });
+
     it('runs a program with user-defined functions and variables', async () => {
         const exitSpy = mockProcessExit();
         const stdout = captureStdout();

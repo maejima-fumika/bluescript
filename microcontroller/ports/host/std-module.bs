@@ -283,9 +283,9 @@ static float get_time_ms() {
     static struct timespec ts0 = { 0, -1 };
     struct timespec ts;
     if (ts0.tv_nsec < 0)
-        clock_gettime(CLOCK_REALTIME, &ts0);
+        clock_gettime(CLOCK_MONOTONIC, &ts0);
 
-    clock_gettime(CLOCK_REALTIME, &ts);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
     return (float)(ts.tv_sec - ts0.tv_sec) * 1000.0 + (float)(ts.tv_nsec - ts0.tv_nsec) / 1000000.0;
 #else
     static LARGE_INTEGER freq = { 0 };
@@ -299,10 +299,39 @@ static float get_time_ms() {
     return (float)(now.QuadPart - start.QuadPart) * 1000.0f / (float)freq.QuadPart;
 #endif
 }
+
+// Milliseconds since the first call, from a monotonic clock.
+// It is computed in double and converted to float once at the end.
+static float performance_now_ms() {
+    static double origin = -1;
+#ifndef _WIN32
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double t = ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+#else
+    static LARGE_INTEGER freq = { 0 };
+    LARGE_INTEGER now;
+    if (freq.QuadPart == 0)
+        QueryPerformanceFrequency(&freq);
+
+    QueryPerformanceCounter(&now);
+    double t = (double)now.QuadPart * 1000.0 / (double)freq.QuadPart;
+#endif
+    if (origin < 0)
+        origin = t;
+
+    return (float)(t - origin);
+}
 `
 
 function print(message: any) {
     code`print_message(${message});`
+}
+
+function performanceNow(): float {
+    let t: float = 0.0
+    code`${t} = performance_now_ms();`
+    return t
 }
 
 // Messages between the projects in a workspace (see `bscript workspace run`).
@@ -444,7 +473,7 @@ class Console {
 
 class Time {
     now(): float {
-        let t: integer = 0
+        let t: float = 0.0
         code`${t} = get_time_ms();`
         return t
     }

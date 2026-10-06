@@ -39,6 +39,15 @@ void write_message_to_buff(value_t message) {
     printf(buff);
 }
 
+// Milliseconds since the first call. esp_timer_get_time() is monotonic.
+static float performance_now_ms() {
+    static int64_t origin_us = -1;
+    int64_t now_us = esp_timer_get_time();
+    if (origin_us < 0)
+        origin_us = now_us;
+
+    return (float)((now_us - origin_us) / 1000.0);
+}
 
 `
 
@@ -48,6 +57,12 @@ function print(message: any) {
     write_message_to_buff(${message});
     bs_protocol_write_log(buff);
     `
+}
+
+function performanceNow(): float {
+    let t: float = 0.0;
+    code`${t} = performance_now_ms();`;
+    return t;
 }
 
 // Messages between the projects in a workspace (see `bscript workspace run`).

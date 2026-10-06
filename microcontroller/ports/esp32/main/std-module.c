@@ -40,6 +40,16 @@ void write_message_to_buff(value_t message) {
     printf(buff);
 }
 
+// Milliseconds since the first call. esp_timer_get_time() is monotonic.
+static float performance_now_ms() {
+    static int64_t origin_us = -1;
+    int64_t now_us = esp_timer_get_time();
+    if (origin_us < 0)
+        origin_us = now_us;
+
+    return (float)((now_us - origin_us) / 1000.0);
+}
+
 void PORT_TEXT_SECTION mth_0_Console(value_t self, value_t _message);
 void PORT_TEXT_SECTION mth_1_Console(value_t self, value_t _message);
 float PORT_TEXT_SECTION mth_0_Time(value_t self);
@@ -74,6 +84,17 @@ static void fbody_print(value_t self, value_t _message) {
   DELETE_ROOT_SET(func_rootset)
 }
 PORT_DATA_SECTION const struct func_body _print = { fbody_print, "(a)v" };
+
+static float fbody_performanceNow(value_t self) {
+  ROOT_SET_N(func_rootset,1,VALUE_UNDEF)
+  func_rootset.values[0] = self;
+  {
+    float _t = 0.0;
+    _t = performance_now_ms();;
+    { float ret_value_ = (_t); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+PORT_DATA_SECTION const struct func_body _performanceNow = { fbody_performanceNow, "()f" };
 
 static void fbody_sendInteger(value_t self, value_t _dst, value_t _tag, int32_t _value) {
   ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)

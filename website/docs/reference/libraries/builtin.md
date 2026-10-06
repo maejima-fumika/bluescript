@@ -24,6 +24,30 @@ print("Hello, World!");
 // Output: Hello, World!
 ```
 
+### `performanceNow(): float`
+
+Returns the elapsed time in milliseconds, for measuring how long something takes. It uses a monotonic clock, so the value does not jump when the system time is changed, and its resolution is a microsecond or better.
+
+The origin is the **first call** to `performanceNow()`: the first call returns about `0`. Only the difference between two values is meaningful. The origin is not shared between projects, so values from different projects cannot be compared.
+
+The value is a 32-bit `float`, so its precision becomes coarser as time passes since the first call. 100 seconds after the first call, the step is still about 8 µs; after about 2.3 hours it is about 1 ms.
+
+**Parameters**
+
+This function takes no parameters.
+
+**Returns**
+- `float`: Milliseconds since the first call to `performanceNow()`.
+
+**Example**
+```ts
+const start = performanceNow();
+work();
+const end = performanceNow();
+print(end - start);
+// Output: 12.345678 (example)
+```
+
 ## Messages Between Projects
 
 When programs are started by [`bscript workspace run`](../cli.md#bscript-workspace-run), they can send values to each other. The programs never talk directly: every message goes through the CLI, which keeps it until the receiver asks for it.

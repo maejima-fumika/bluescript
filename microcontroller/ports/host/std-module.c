@@ -279,9 +279,9 @@ static float get_time_ms() {
     static struct timespec ts0 = { 0, -1 };
     struct timespec ts;
     if (ts0.tv_nsec < 0)
-        clock_gettime(CLOCK_REALTIME, &ts0);
+        clock_gettime(CLOCK_MONOTONIC, &ts0);
 
-    clock_gettime(CLOCK_REALTIME, &ts);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
     return (float)(ts.tv_sec - ts0.tv_sec) * 1000.0 + (float)(ts.tv_nsec - ts0.tv_nsec) / 1000000.0;
 #else
     static LARGE_INTEGER freq = { 0 };
@@ -296,7 +296,31 @@ static float get_time_ms() {
 #endif
 }
 
+// Milliseconds since the first call, from a monotonic clock.
+// It is computed in double and converted to float once at the end.
+static float performance_now_ms() {
+    static double origin = -1;
+#ifndef _WIN32
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double t = ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+#else
+    static LARGE_INTEGER freq = { 0 };
+    LARGE_INTEGER now;
+    if (freq.QuadPart == 0)
+        QueryPerformanceFrequency(&freq);
+
+    QueryPerformanceCounter(&now);
+    double t = (double)now.QuadPart * 1000.0 / (double)freq.QuadPart;
+#endif
+    if (origin < 0)
+        origin = t;
+
+    return (float)(t - origin);
+}
+
 extern struct func_body _print;
+extern struct func_body _performanceNow;
 extern struct func_body _sendInteger;
 extern struct func_body _broadcastInteger;
 extern struct func_body _receiveInteger;
@@ -353,6 +377,17 @@ static void fbody_print(value_t self, value_t _message) {
   DELETE_ROOT_SET(func_rootset)
 }
 struct func_body _print = { fbody_print, "(a)v" };
+
+static float fbody_performanceNow(value_t self) {
+  ROOT_SET_N(func_rootset,1,VALUE_UNDEF)
+  func_rootset.values[0] = self;
+  {
+    float _t = 0.0;
+    _t = performance_now_ms();;
+    { float ret_value_ = (_t); DELETE_ROOT_SET(func_rootset); return ret_value_; }
+  }
+}
+struct func_body _performanceNow = { fbody_performanceNow, "()f" };
 
 static void fbody_sendInteger(value_t self, value_t _dst, value_t _tag, int32_t _value) {
   ROOT_SET_N(func_rootset,3,VALUE_UNDEF_3)
@@ -716,7 +751,7 @@ float mth_0_Time(value_t self) {
   ROOT_SET_N(func_rootset,1,VALUE_UNDEF)
   func_rootset.values[0] = self;
   {
-    int32_t _t = 0;
+    float _t = 0.0;
     _t = get_time_ms();;
     { float ret_value_ = (_t); DELETE_ROOT_SET(func_rootset); return ret_value_; }
   }
