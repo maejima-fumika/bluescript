@@ -8,6 +8,7 @@ import { cwd } from '../../../src/core/command-exec';
 import * as fs from '../../../src/core/fs';
 import { WorkspaceConfigHandler } from '../../../src/config/workspace-config';
 import { handleWorkspaceRunCommand } from '../../../src/commands/workspace/run';
+import { logger } from '../../../src/core/logger';
 import {
     deleteGlobalEnv,
     setupGlobalEnvWithHostIntegration,
@@ -85,6 +86,82 @@ describeHostIntegration('workspace run command (host integration)', () => {
 
         output.restore();
         exitSpy.mockRestore();
+    });
+
+    it('prints a STATS line for each project with --stats', async () => {
+        const exitSpy = mockProcessExit();
+        const output = captureOutput();
+
+        const program = `
+let s = "";
+for (let i = 0; i < 100; i++) {
+    s = "x" + i;
+}
+console.log(s);`;
+        createWorkspace({ alpha: program, beta: program });
+
+        await handleWorkspaceRunCommand([], { stats: true });
+
+        expectExitCode(exitSpy, 0, output);
+        const text = output.text().replace(ANSI_PATTERN, '');
+        const heapWords = process.env.BSCRIPT_HOST_HEAP_WORDS || '8194';
+        for (const name of ['alpha', 'beta']) {
+            const pattern = new RegExp(`^STATS ${name} status=finished exec_ms=\\d+\\.\\d{3} gc_runs=\\d+ gc_ms=\\d+\\.\\d{3} `
+                + `alloc_words=(\\d+) alloc_objects=(\\d+) heap_words=${heapWords}$`, 'm');
+            const match = text.match(pattern);
+            expect(match).not.toBeNull();
+            expect(Number(match![1])).toBeGreaterThan(0);
+            expect(Number(match![2])).toBeGreaterThan(0);
+        }
+
+        output.restore();
+        exitSpy.mockRestore();
+    });
+
+    it('reports a project that ends with a runtime error', async () => {
+        (logger.error as jest.Mock).mockClear();
+        (logger.success as jest.Mock).mockClear();
+        const exitSpy = mockProcessExit();
+        const output = captureOutput();
+
+        createWorkspace({
+            alpha: 'let a: integer[] = [1, 2];\nconsole.log(a[5]);\nconsole.log("unreachable");',
+            beta: 'console.log("hello from beta");',
+        });
+
+        await handleWorkspaceRunCommand([], { stats: true });
+
+        expect(exitSpy).toHaveBeenCalledWith(1);
+        const text = output.text().replace(ANSI_PATTERN, '');
+        expect(text).not.toContain('unreachable');
+        expect(text).toMatch(/^STATS alpha status=error exec_ms=\d+\.\d{3} /m);
+        expect(text).toMatch(/^STATS beta status=finished exec_ms=\d+\.\d{3} /m);
+        expect(logger.error).toHaveBeenCalledWith('[alpha]', 'Ended with a runtime error.');
+        expect(logger.success).toHaveBeenCalledWith('[beta ]', 'Finished.');
+        expect(logger.success).not.toHaveBeenCalledWith('[alpha]', 'Finished.');
+
+        output.restore();
+        exitSpy.mockRestore();
+    });
+
+    it('prints the same output as before without --stats', async () => {
+        createWorkspace({ alpha: 'console.log("hello from alpha");\nconsole.log(1 + 2);' });
+        const run = async (options?: { stats?: boolean }) => {
+            const exitSpy = mockProcessExit();
+            const output = captureOutput();
+            await handleWorkspaceRunCommand([], options);
+            expectExitCode(exitSpy, 0, output);
+            output.restore();
+            exitSpy.mockRestore();
+            return output.text();
+        };
+
+        const withoutStats = await run();
+        const withStats = await run({ stats: true });
+
+        expect(withoutStats).not.toContain('STATS');
+        expect(withStats).toMatch(/^STATS alpha /m);
+        expect(withStats.replace(/^STATS .*\n/m, '')).toBe(withoutStats);
     });
 
     it('runs only the named projects', async () => {

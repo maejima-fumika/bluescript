@@ -10,6 +10,49 @@ import {
 import { MessageValue } from '../../../src/services/protocol/message-value';
 
 
+describe('host protocol statistics of the garbage collector', () => {
+    test('should parse gcstats', () => {
+        const line = hostProtocolBuilder(HostProtocol.GcStats, '3 1.2500 40962 512 8194');
+        const { parsed, remain } = new HostProtocolParser().parse(line);
+        expect(parsed).toEqual([{
+            protocol: HostProtocol.GcStats,
+            stats: { runs: 3, gcMs: 1.25, allocWords: 40962, allocObjects: 512, heapWords: 8194 },
+        }]);
+        expect(remain).toBe('\n');
+    });
+
+    test('should parse gcstats followed by exectime, as the shell sends them', () => {
+        // The shell writes frames without a newline.
+        const output = '12 0018 0 0.0000 6 1 16384' + '05 0008 0.1234 0';
+        const { parsed, remain } = new HostProtocolParser().parse(output);
+        expect(parsed).toEqual([
+            {
+                protocol: HostProtocol.GcStats,
+                stats: { runs: 0, gcMs: 0, allocWords: 6, allocObjects: 1, heapWords: 16384 },
+            },
+            { protocol: HostProtocol.Exectime, time: 0.1234, error: false },
+        ]);
+        expect(remain).toBe('');
+    });
+});
+
+describe('host protocol exectime', () => {
+    test('should parse a run that ended with a runtime error', () => {
+        const { parsed } = new HostProtocolParser().parse('05 0008 0.1234 1');
+        expect(parsed).toEqual([{ protocol: HostProtocol.Exectime, time: 0.1234, error: true }]);
+    });
+
+    test('should parse a run that completed', () => {
+        const { parsed } = new HostProtocolParser().parse('05 0008 2.5000 0');
+        expect(parsed).toEqual([{ protocol: HostProtocol.Exectime, time: 2.5, error: false }]);
+    });
+
+    test('should treat the time alone as a run without an error', () => {
+        const { parsed } = new HostProtocolParser().parse('05 0006 0.1234');
+        expect(parsed).toEqual([{ protocol: HostProtocol.Exectime, time: 0.1234, error: false }]);
+    });
+});
+
 describe('host protocol messaging commands', () => {
     test('should parse send command', () => {
         const line = hostProtocolBuilder(HostProtocol.Send, '004beta004tempi-42');
@@ -35,6 +78,7 @@ describe('host protocol messaging commands', () => {
     test('should keep the command numbers the shell uses', () => {
         // Must match host_protocol_t in microcontroller/ports/host/comm.h.
         expect(HostProtocol.Broadcast).toBe(11);
+        expect(HostProtocol.GcStats).toBe(12);
     });
 
     test('should parse names that contain digits and spaces', () => {

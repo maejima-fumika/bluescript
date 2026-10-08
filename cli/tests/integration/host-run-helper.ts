@@ -190,12 +190,29 @@ export async function assertHostIntegrationPrerequisites(): Promise<void> {
     }
 }
 
-export async function ensureHostRuntimeBuilt(): Promise<void> {
+export async function ensureHostRuntimeBuilt(runtimeDir = HOST_INTEGRATION_RUNTIME_DIR): Promise<void> {
     await assertHostIntegrationPrerequisites();
     jest.spyOn(BoardEnv.prototype, 'runtimeDir', 'get')
-        .mockReturnValue(HOST_INTEGRATION_RUNTIME_DIR);
+        .mockReturnValue(runtimeDir);
     const hostEnv = createBoardEnv('host');
     await hostEnv.buildHostRuntime();
+}
+
+/**
+ * Copies the sources of the host runtime to `dest`, so that it can be built there
+ * with other settings without touching the shared build directory.
+ */
+export function copyHostRuntime(dest: string) {
+    for (const dir of ['core/include', 'core/src']) {
+        fs.copyDir(path.join(HOST_INTEGRATION_RUNTIME_DIR, dir), path.join(dest, dir));
+    }
+    const hostDir = path.join(HOST_INTEGRATION_RUNTIME_DIR, 'ports/host');
+    fs.makeDir(path.join(dest, 'ports/host'));
+    for (const name of nodeFs.readdirSync(hostDir)) {
+        if (name !== 'build') {
+            nodeFs.copyFileSync(path.join(hostDir, name), path.join(dest, 'ports/host', name));
+        }
+    }
 }
 
 export function dumpRunDiagnostics(

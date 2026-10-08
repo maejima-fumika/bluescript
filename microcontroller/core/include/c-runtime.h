@@ -293,6 +293,19 @@ extern bool CR_SECTION gc_is_anyarray(value_t v);
 extern void CR_SECTION gc_init_rootset(struct gc_root_set* set, uint32_t length);
 extern void CR_SECTION gc_run();
 
+// Statistics of the garbage collector and the memory allocation.
+// gc_ms is measured only on the host (except Windows).
+struct gc_stats {
+    uint32_t runs;
+    double gc_ms;
+    uint64_t alloc_words;       // including object headers and paddings
+    uint32_t alloc_objects;
+};
+
+extern void gc_stats_reset();
+extern void gc_get_stats(struct gc_stats* stats);
+extern uint32_t gc_heap_words();
+
 extern struct gc_root_set* gc_root_set_head;
 
 #endif

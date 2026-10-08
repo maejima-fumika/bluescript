@@ -15,6 +15,15 @@ export abstract class CommandHandlerWithUpdateCheck extends CommandHandler {
         this.globalConfigHandler = GlobalConfigHandler.load();
     }
 
+    /** The runtime directory in the global config. */
+    protected getRuntimeDir() {
+        const runtimeDir = this.globalConfigHandler.getConfig().runtimeDir;
+        if (!runtimeDir) {
+            throw new Error('An unexpected error occurred: cannot find runtime directory path.');
+        }
+        return runtimeDir;
+    }
+
     private checkUpdate() {
         if (!fs.exists(GLOBAL_SETTINGS.BLUESCRIPT_CONFIG_FILE)) {
             return;

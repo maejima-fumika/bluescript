@@ -35,6 +35,9 @@
 #ifdef LINUX64
 
 #include <stdlib.h>
+#ifndef _WIN32
+#include <time.h>       // for clock_gettime()
+#endif
 
 #define MASK32      0xffffffff
 #define MASK64H     0xffffffff00000000
@@ -92,7 +95,14 @@ static inline value_t raw_ptr_to_value(const void* v) { return (value_t)v; }
 
 #endif /* LINUX64 */
 
+// The host runtime can be built with another size by -DHEAP_SIZE=<words>.
+#ifndef HEAP_SIZE
 #define HEAP_SIZE       (1024 * 8 + 2) // words (even number)
+#endif
+
+#if HEAP_SIZE % 2 != 0
+#error "HEAP_SIZE must be an even number"
+#endif
 
 static value_t heap_memory[HEAP_SIZE];
 
@@ -455,6 +465,12 @@ void gc_initialize() {
     heap_memory[3] = HEAP_SIZE - 2;
     gc_root_set_head = NULL;
 #ifdef LINUX64
+    // A pointer into the heap keeps only its lower 32 bits (see gc_heap_pointer()).
+    if (((uint64_t)heap_memory & MASK64H) != ((uint64_t)&heap_memory[HEAP_SIZE - 1] & MASK64H)) {
+        fputs("** the heap crosses a 4 GB boundary.  Use a smaller HEAP_SIZE **\n", stderr);
+        exit(1);
+    }
+
     initialize_pointer_table();
 #endif
 }
@@ -529,7 +545,7 @@ void* gc_method_lookup(value_t obj, uint32_t index) {
 CLASS_OBJECT(object_class, 1) = {
     .clazz = { .size = 0, .start_index = 0, .name = "object", .superclass = NULL, .array_type_name = NULL, .table = DEFAULT_PTABLE, .mtable = DEFAULT_MTABLE }};
 
-static pointer_t allocate_heap(uint16_t word_size);
+static pointer_t allocate_heap(uint32_t word_size);
 
 pointer_t gc_allocate_object(const class_object* clazz) {
     int32_t size = clazz->size;
@@ -1971,8 +1987,8 @@ value_t gc_dynamic_method_call(value_t obj, uint32_t index, uint32_t num, ...) {
 //
 // length: length of object_type.body[]
 // returns the size including a header and a padding.
-static uint16_t real_objsize(uint16_t length) {
-    uint16_t size = length + 1;     // add the size of the header
+static uint32_t real_objsize(uint32_t length) {
+    uint32_t size = length + 1;     // add the size of the header
     return (size + 1) & ~1;         // make it a even numbrer
 }
 
@@ -1996,7 +2012,7 @@ static pointer_t no_more_memory() {
 
   The size of an allocated chunk is an even number.
 */
-static pointer_t allocate_heap_base(uint16_t word_size) {
+static pointer_t allocate_heap_base(uint32_t word_size) {
     word_size = real_objsize(word_size);
     value_t prev = 0;
     value_t current = heap_memory[0];
@@ -2022,22 +2038,36 @@ static pointer_t allocate_heap_base(uint16_t word_size) {
     return NULL;
 }
 
-static pointer_t allocate_heap(uint16_t word_size) {
+static struct gc_stats gc_stats_data = { 0 };
+
+void gc_stats_reset() {
+    gc_stats_data = (struct gc_stats){ 0 };
+}
+
+void gc_get_stats(struct gc_stats* stats) {
+    *stats = gc_stats_data;
+}
+
+uint32_t gc_heap_words() {
+    return HEAP_SIZE;
+}
+
+static pointer_t allocate_heap(uint32_t word_size) {
     if (nested_interrupt_handler > 0) {
         runtime_memory_allocation_error("you cannot create objects in an interrupt handler.");
     }
 
     pointer_t ptr = allocate_heap_base(word_size);
-    if (ptr != NULL)
-        return ptr;
-    else {
+    if (ptr == NULL) {
         gc_run();
         ptr = allocate_heap_base(word_size);
-        if (ptr != NULL)
-            return ptr;
-        else
+        if (ptr == NULL)
             return no_more_memory();
     }
+
+    gc_stats_data.alloc_objects++;
+    gc_stats_data.alloc_words += real_objsize(word_size);
+    return ptr;
 }
 
 struct gc_root_set* gc_root_set_head = NULL;
@@ -2279,12 +2309,22 @@ static void sweep_objects(uint32_t mark) {
 }
 
 void gc_run() {
+#if defined(LINUX64) && !defined(_WIN32)
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+#endif
     gc_is_running = true;
     uint32_t mark = current_no_mark ? 0 : 1;
     mark_objects(gc_root_set_head, mark);
     sweep_objects(mark);
     current_no_mark = mark;
     gc_is_running = false;
+
+    gc_stats_data.runs++;
+#if defined(LINUX64) && !defined(_WIN32)
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    gc_stats_data.gc_ms += (end.tv_sec - start.tv_sec) * 1000.0 + (end.tv_nsec - start.tv_nsec) / 1e6;
+#endif
 }
 
 #ifdef LINUX64

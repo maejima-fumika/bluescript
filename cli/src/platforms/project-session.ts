@@ -8,6 +8,7 @@ import { EventEmitter, EventMap } from "../services/common";
 import { CompileContext, CompilerAdapter, getCompilerAdapter } from "./compiler";
 import { MessagePort, MessageValue } from "./messaging";
 import { BoardRuntime, getBoardRuntime } from "./runtime";
+import { ExecResult } from "./runtime/exec-result";
 
 const CLOSE_TIMEOUT_MS = 3_000;
 
@@ -74,7 +75,7 @@ export class ProjectSession extends EventEmitter<ProjectSessionEvents> {
         return this.guard(() => this.runtime.load(output, onPacketSent));
     }
 
-    execute(output: CompileOutput): Promise<number> {
+    execute(output: CompileOutput): Promise<ExecResult> {
         return this.guard(() => this.runtime.execute(output));
     }
 

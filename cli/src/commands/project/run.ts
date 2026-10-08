@@ -7,17 +7,25 @@ import { BoxedOutput, LineOutput, WebSocketOutput } from "../../core/program-out
 import { DEFAULT_DEVICE_NAME, ProjectConfigHandler } from "../../config/project-config";
 import { cwd, simpleExec } from "../../core/command-exec";
 import { CommandHandlerWithUpdateCheck } from "../command";
-import { ProjectSession } from "../../platforms/project-session";
+import { ProjectSession, SessionDisconnectedError } from "../../platforms/project-session";
 import { CompileError, CompileOutput } from "@bscript/lang";
 import { WebSocketConnection } from "../../services/websocket";
 import { AsyncLock } from "../../core/async";
 import { terminal } from "../../core/terminal";
+import { ExecResult, formatStatsLine, RunStatus, statusOf, writeStatsTable } from "../../platforms/runtime/exec-result";
 
 class RunHandler extends CommandHandlerWithUpdateCheck {
     protected session: ProjectSession;
     private readonly boxedOutput = new BoxedOutput();
+    private executing = false;
+    /** Whether the entry file ended with a runtime error that it did not catch. */
+    mainEndedWithError = false;
 
-    constructor(protected projectConfigHandler: ProjectConfigHandler, deviceName?: string) {
+    constructor(
+        protected projectConfigHandler: ProjectConfigHandler,
+        deviceName?: string,
+        private readonly showStats = false,
+    ) {
         super();
 
         this.session = new ProjectSession(
@@ -25,6 +33,9 @@ class RunHandler extends CommandHandlerWithUpdateCheck {
         );
         this.session.on('disconnected', () => {
             this.boxedOutput.close();
+            if (this.executing) {
+                this.reportStats('disconnected');
+            }
             logger.error("Disconnected.");
             process.exit(1);
         });
@@ -59,14 +70,53 @@ class RunHandler extends CommandHandlerWithUpdateCheck {
             onCtrlC: () => process.exit(0),
             onCtrlD: () => requestStop(),
         });
+        let result: ExecResult | undefined;
+        let interrupted: boolean;
+        this.executing = true;
         try {
-            return await Promise.race([
-                this.session.execute(output).then(() => false),
+            interrupted = await Promise.race([
+                this.session.execute(output).then((r) => {
+                    result = r;
+                    return false;
+                }),
                 stopRequested,
             ]);
+        } catch (error) {
+            this.boxedOutput.close();
+            // A disconnection is reported by the 'disconnected' listener.
+            if (!(error instanceof SessionDisconnectedError)) {
+                this.reportStats('failed');
+            }
+            throw error;
         } finally {
+            this.executing = false;
             disposeControlKeys();
             this.boxedOutput.close();
+        }
+        if (interrupted || !result) {
+            this.reportStats('stopped');
+            return true;
+        }
+        this.reportStats(statusOf(result), result);
+        if (result.error) {
+            this.mainEndedWithError = true;
+            logger.error('The program ended with a runtime error.');
+        }
+        return false;
+    }
+
+    /**
+     * With --stats, a script reads one line, and a terminal shows a table
+     * when the program completed.
+     */
+    private reportStats(status: RunStatus, result?: ExecResult) {
+        if (!this.showStats) {
+            return;
+        }
+        if (!terminal.isOutputTerminal) {
+            terminal.writeLine(formatStatsLine(this.session.name, status, result));
+        } else if (status === 'finished' && result) {
+            writeStatsTable([{ projectName: this.session.name, result }]);
         }
     }
 }
@@ -206,27 +256,29 @@ class RunWithNotebookHandler extends RunHandler {
     }
 
     private async execute(output: CompileOutput) {
-        return await this.session.execute(output);
+        return (await this.session.execute(output)).exectime;
     }
 }
 
 export async function handleRunCommand(
-    options: {withRepl: boolean, withNotebook: boolean, deviceName?: string}
+    options: {withRepl: boolean, withNotebook: boolean, deviceName?: string, stats?: boolean}
 ) {
     let handler: RunHandler | undefined;
     try {
         const projectConfigHandler = ProjectConfigHandler.load(cwd());
         if (options.withRepl) {
-            handler = new RunWithReplHandler(projectConfigHandler, options.deviceName);
+            handler = new RunWithReplHandler(projectConfigHandler, options.deviceName, options.stats);
         } else if (options.withNotebook) {
-            handler = new RunWithNotebookHandler(projectConfigHandler, options.deviceName);
+            handler = new RunWithNotebookHandler(projectConfigHandler, options.deviceName, options.stats);
         } else {
-            handler = new RunHandler(projectConfigHandler, options.deviceName);
+            handler = new RunHandler(projectConfigHandler, options.deviceName, options.stats);
         }
 
         await handler.run();
         await handler.close();
-        process.exit(0);
+        // With a REPL or a notebook, a runtime error in the entry file does not end the session.
+        const failed = handler.mainEndedWithError && !options.withRepl && !options.withNotebook;
+        process.exit(failed ? 1 : 0);
 
     } catch (error) {
         if (handler) {
@@ -255,5 +307,6 @@ export function registerRunCommand(program: Command) {
             new Option('--with-notebook', 'start notebook after main execution finished')
             .conflicts('withRepl')
         )
+        .option('--stats', 'print the execution time and the memory statistics when the program finishes')
         .action(handleRunCommand);
 }

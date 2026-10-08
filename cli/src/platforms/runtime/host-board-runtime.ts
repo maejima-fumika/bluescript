@@ -2,6 +2,7 @@ import * as path from 'path';
 import { SharedLibrary } from "@bscript/lang";
 import { ProgramOutput } from "../../core/program-output";
 import { BoardRuntime } from "./board-runtime";
+import { addGcStats, ExecResult, GcStats } from "./exec-result";
 import { CompileContext } from "../compiler/compiler-adapter";
 import { HostBoardConfig } from "../../config/global-config";
 import { HostService, ProcessConnection } from '../../services/process';
@@ -64,12 +65,17 @@ export class HostBoardRuntime implements BoardRuntime<SharedLibrary> {
         return this.hostService.load(output.filePath);
     }
 
-    async execute(output: SharedLibrary): Promise<number> {
+    async execute(output: SharedLibrary): Promise<ExecResult> {
         let exectime = 0;
-        for (const entry of output.entryNames) {
-            exectime += await this.hostService.execute(entry.name);
+        let error = false;
+        let gcStats: GcStats | undefined;
+        for (const [i, entry] of output.entryNames.entries()) {
+            const result = await this.hostService.execute(entry.name);
+            exectime += result.exectime;
+            error ||= result.error;
+            gcStats = i === 0 ? result.gcStats : addGcStats(gcStats, result.gcStats);
         }
-        return exectime;
+        return { exectime, error, gcStats };
     }
 
     setOutput(output: ProgramOutput): void {

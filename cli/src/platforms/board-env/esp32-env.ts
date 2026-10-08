@@ -23,6 +23,19 @@ export abstract class Esp32Env extends BoardEnv {
     abstract runEspIdfInstallScript(): Promise<void>;
     abstract getXtensaGccDir(pythonCommand: string): Promise<string>;
     abstract getMakeCommand(): Promise<string>;
+    /** The shell command that loads the ESP-IDF environment from its export file. */
+    abstract exportCommand(exportFile: string): string;
+
+    /** The directory of the esp32 port in the runtime directory. */
+    espPortDir(runtimeDir: string) { return path.join(runtimeDir, 'ports/esp32'); }
+
+    /** Runs idf.py in the esp32 port of the runtime directory. */
+    async runIdfPy(exportFile: string, runtimeDir: string, args: string[]) {
+        await execShell(
+            `${this.exportCommand(exportFile)} && idf.py ${args.join(' ')}`,
+            { cwd: this.espPortDir(runtimeDir) },
+        );
+    }
 
     async cloneEspIdf() {
         await execWithLog(
@@ -127,6 +140,10 @@ export class Esp32UnixEnv extends Esp32Env {
         await execShell(`bash ${JSON.stringify(this.idfInstallShFile)} esp32`);
     }
 
+    exportCommand(exportFile: string) {
+        return `source ${exportFile}`;
+    }
+
     async getXtensaGccDir(pythonCommand: string) {
         try {
             const stdout = await simpleExec(
@@ -162,6 +179,10 @@ export class Esp32WindowsEnv extends Esp32Env {
 
     async runEspIdfInstallScript() {
         await execShell(`${this.idfInstallBatFile} esp32`);
+    }
+
+    exportCommand(exportFile: string) {
+        return `call ${exportFile}`;
     }
 
     async getXtensaGccDir(pythonCommand: string) {

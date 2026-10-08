@@ -17,8 +17,21 @@ export enum HostProtocol {
     Reply = 9,
     ReplyError = 10,
     Broadcast = 11,
+
+    // Statistics of the garbage collector, sent just before Exectime.
+    GcStats = 12,
     Max
 }
+
+/** What the program did with the heap during one Call. */
+export type GcStats = {
+    runs: number;
+    gcMs: number;
+    /** Including object headers and paddings. */
+    allocWords: number;
+    allocObjects: number;
+    heapWords: number;
+};
 
 // Must match MAX_PAYLOAD_SIZE in microcontroller/ports/host/comm.h.
 export const HOST_MAX_PAYLOAD_SIZE = 4096;
@@ -181,13 +194,14 @@ type HostProtocolPayloads = {
     [HostProtocol.Call]: {};
     [HostProtocol.Log]: { log: string };
     [HostProtocol.Error]: { error: string };
-    [HostProtocol.Exectime]: { time: number };
+    [HostProtocol.Exectime]: { time: number; error: boolean };
     [HostProtocol.Loadtime]: { time: number };
     [HostProtocol.Send]: { dst: string; tag: string; message: MessageValue };
     [HostProtocol.Receive]: { src: string; tag: string; expected: MessageType };
     [HostProtocol.Reply]: {};
     [HostProtocol.ReplyError]: {};
     [HostProtocol.Broadcast]: { tag: string; message: MessageValue };
+    [HostProtocol.GcStats]: { stats: GcStats };
     [HostProtocol.Max]: {};
 }
 
@@ -209,6 +223,7 @@ export class HostProtocolParser {
             [HostProtocol.Send]: HostProtocolParser.parseSend,
             [HostProtocol.Receive]: HostProtocolParser.parseReceive,
             [HostProtocol.Broadcast]: HostProtocolParser.parseBroadcast,
+            [HostProtocol.GcStats]: HostProtocolParser.parseGcStats,
         }
     }
 
@@ -262,12 +277,20 @@ export class HostProtocolParser {
         return { error: decodeBytes(payload) };
     }
 
-    static parseExectime(payload: string): { time: number } {
-        return { time: Number(payload) };
+    // <time> <error>: error is 1 when the program ended with a runtime error.
+    static parseExectime(payload: string): { time: number; error: boolean } {
+        const [time, error] = payload.split(' ');
+        return { time: Number(time), error: error === '1' };
     }
 
     static parseLoadtime(payload: string): { time: number } {
         return { time: Number(payload) };
+    }
+
+    // <runs> <gc_ms> <alloc_words> <alloc_objects> <heap_words>
+    static parseGcStats(payload: string): { stats: GcStats } {
+        const [runs, gcMs, allocWords, allocObjects, heapWords] = payload.split(' ').map(Number);
+        return { stats: { runs, gcMs, allocWords, allocObjects, heapWords } };
     }
 
     // <dstLen(3)><dst><tagLen(3)><tag><value>

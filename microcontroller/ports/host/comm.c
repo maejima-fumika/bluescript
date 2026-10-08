@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <inttypes.h>
 #include "./comm.h"
 
 
@@ -27,16 +28,25 @@ void bs_comm_send_error(char* message) {
     comm_send(H_PROTOCOL_ERROR, message);
 }
 
-void bs_comm_send_exectime(float time) {
-    char timestr[16];
-    snprintf(timestr, sizeof(timestr), "%.4f", time);
-    comm_send(H_PROTOCOL_EXECTIME, timestr);
+// "<time> <error>"
+void bs_comm_send_exectime(float time, int error) {
+    char payload[32];
+    snprintf(payload, sizeof(payload), "%.4f %d", time, error ? 1 : 0);
+    comm_send(H_PROTOCOL_EXECTIME, payload);
 }
 
 void bs_comm_send_loadtime(float time) {
     char timestr[16];
     snprintf(timestr, sizeof(timestr), "%.2f", time);
     comm_send(H_PROTOCOL_LOADTIME, timestr);
+}
+
+// "<runs> <gc_ms> <alloc_words> <alloc_objects> <heap_words>"
+void bs_comm_send_gcstats(uint32_t runs, double gc_ms, uint64_t alloc_words, uint32_t alloc_objects, uint32_t heap_words) {
+    char payload[128];
+    snprintf(payload, sizeof(payload), "%" PRIu32 " %.4f %" PRIu64 " %" PRIu32 " %" PRIu32,
+             runs, gc_ms, alloc_words, alloc_objects, heap_words);
+    comm_send(H_PROTOCOL_GCSTATS, payload);
 }
 
 static void parse_line(char* line, host_protocol_t* protocol, char* payload) {

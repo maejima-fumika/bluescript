@@ -72,9 +72,14 @@ static void call(char* funcname) {
         fprintf(stderr, "Error: %s() is not found\n", funcname);
         //return 1;
     } else {
+        gc_stats_reset();
         float start_time = get_time_ms();
         int r2 = try_and_catch(fptr);
-        bs_comm_send_exectime(get_time_ms() - start_time);
+        float exectime = get_time_ms() - start_time;
+        struct gc_stats stats;
+        gc_get_stats(&stats);
+        bs_comm_send_gcstats(stats.runs, stats.gc_ms, stats.alloc_words, stats.alloc_objects, gc_heap_words());
+        bs_comm_send_exectime(exectime, r2);
         //return r2;
     }
 }

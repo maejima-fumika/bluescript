@@ -1,17 +1,13 @@
 import { Command } from "commander";
 import inquirer from 'inquirer';
-import * as path from 'path';
-import * as os from 'os';
 import { SerialPort } from 'serialport'
 import { BoardName } from "../../config/board-utils";
 import { logger, runStep } from "../../core/logger";
-import { execShell } from '../../core/command-exec';
 import chalk from "chalk";
 import { CommandHandlerWithUpdateCheck } from "../command";
 import { DEFAULT_DEVICE_NAME } from "../../config/project-config";
+import { createBoardEnv } from "../../platforms/board-env";
 
-
-const RUNTIME_ESP_PORT_DIR = (runtimeDir: string) => path.join(runtimeDir, 'ports/esp32');
 
 abstract class FlashRuntimeHandler extends CommandHandlerWithUpdateCheck {
     abstract isSetup(): boolean;
@@ -43,19 +39,7 @@ class ESP32FlashRuntimeHandler extends FlashRuntimeHandler {
     }
 
     private async runIdfPy(args: string[]) {
-        const osType = os.platform();
-        const exportFile = this.getExportFile();
-        const cwd = this.getEspPortDir();
-        const preCommand = osType === 'win32' ? `call ${exportFile}` : `source ${exportFile}`;
-        await execShell(`${preCommand} && idf.py ${args.join(' ')}`, { cwd });
-    }
-
-    private getEspPortDir() {
-        const runtimeDir = this.globalConfigHandler.getConfig().runtimeDir;
-        if (!runtimeDir) {
-            throw new Error('An unexpected error occurred: cannot find runtime directory path.');
-        }
-        return RUNTIME_ESP_PORT_DIR(runtimeDir);
+        await createBoardEnv('esp32').runIdfPy(this.getExportFile(), this.getRuntimeDir(), args);
     }
 
     private getExportFile() {

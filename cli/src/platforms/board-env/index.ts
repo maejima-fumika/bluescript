@@ -10,8 +10,12 @@ type BoardEnvMap = {
     host: HostEnv;
 };
 
-export function createBoardEnv<B extends BoardName>(board: B): BoardEnvMap[B];
-export function createBoardEnv(board: BoardName): BoardEnvMap[BoardName] {
+/**
+ * @param runtimeDir the runtime directory that the host runtime is built from.
+ *   Only used for host. Defaults to the runtime downloaded under ~/.bluescript.
+ */
+export function createBoardEnv<B extends BoardName>(board: B, runtimeDir?: string): BoardEnvMap[B];
+export function createBoardEnv(board: BoardName, runtimeDir?: string): BoardEnvMap[BoardName] {
     const osType = os.platform();
     if (board === 'esp32') {
         if (osType === 'darwin' || osType === 'linux')
@@ -22,9 +26,9 @@ export function createBoardEnv(board: BoardName): BoardEnvMap[BoardName] {
     }
     if (board === 'host') {
         if (osType === 'darwin' || osType === 'linux')
-            return new HostUnixEnv();
+            return new HostUnixEnv(runtimeDir);
         if (osType === 'win32')
-            return new HostWindowsEnv();
+            return new HostWindowsEnv(runtimeDir);
         throw new Error(`Unsupported OS type: ${osType}.`);
     }
     throw new Error(`Unsupported board name: ${board}`);

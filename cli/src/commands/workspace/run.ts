@@ -10,6 +10,7 @@ import { DEFAULT_DEVICE_NAME } from "../../config/project-config";
 import { WorkspaceConfigHandler, WorkspaceProject } from "../../config/workspace-config";
 import { ProjectSession, SessionDisconnectedError } from "../../platforms/project-session";
 import { MessageRouter } from "../../platforms/messaging";
+import { ExecResult, formatStatsLine, RunStatus, statusOf, writeStatsTable } from "../../platforms/runtime/exec-result";
 import { CommandHandlerWithUpdateCheck } from "../command";
 
 const START_MESSAGE = "Start executing programs. Type 'Ctrl-D' to exit.";
@@ -37,10 +38,13 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
     private summary = '';
     private readonly failed = new Set<string>();
     private readonly finished = new Set<string>();
+    /** The results of the projects that completed, shown in one table at the end in a terminal. */
+    private readonly results = new Map<string, ExecResult>();
 
     constructor(
         private workspaceConfigHandler: WorkspaceConfigHandler,
         private projectNames: string[],
+        private readonly showStats = false,
     ) {
         super();
     }
@@ -199,16 +203,36 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
                 m.output.flush();
             }
             view.stop();
+            for (const m of this.members) {
+                if (!this.finished.has(m.name) && !this.failed.has(m.name)) {
+                    this.reportStats(m, 'stopped');
+                }
+            }
+            const rows = this.members
+                .filter((m) => this.results.has(m.name))
+                .map((m) => ({ projectName: m.name, result: this.results.get(m.name)! }));
+            if (rows.length > 0) {
+                terminal.writeLine('');
+                writeStatsTable(rows);
+            }
         }
     }
 
     /** Never throws, so one failing project does not stop the others. */
     private async executeOne(m: Member) {
         try {
-            await m.session.execute(m.compileOutput!);
+            const result = await m.session.execute(m.compileOutput!);
             this.finished.add(m.name);
             this.router?.close(m.name);
             m.output.flush();
+            this.reportStats(m, statusOf(result), result);
+            if (result.error) {
+                // The program has ended, so a later disconnection is still not reported.
+                this.failed.add(m.name);
+                this.view?.setState(m.name, 'failed');
+                logger.error(m.tag, 'Ended with a runtime error.');
+                return;
+            }
             this.view?.setState(m.name, 'finished');
             // While the screen is split, the footer already shows it.
             if (!this.view?.isOpen) {
@@ -217,13 +241,30 @@ class WorkspaceRunHandler extends CommandHandlerWithUpdateCheck {
         } catch (error) {
             this.router?.close(m.name);
             this.failed.add(m.name);
+            const disconnected = error instanceof SessionDisconnectedError;
+            this.reportStats(m, disconnected ? 'disconnected' : 'failed');
             // A disconnection is already reported by the 'disconnected' listener.
-            if (!(error instanceof SessionDisconnectedError)) {
+            if (!disconnected) {
                 this.view?.setState(m.name, 'failed');
                 m.output.flush();
                 logger.error(m.tag, 'Execution failed.');
                 logger.showError(error, 4);
             }
+        }
+    }
+
+    /**
+     * With --stats, a script reads one line per project as soon as it ends,
+     * and a terminal shows a table of the projects that completed, at the end.
+     */
+    private reportStats(m: Member, status: RunStatus, result?: ExecResult) {
+        if (!this.showStats) {
+            return;
+        }
+        if (!terminal.isOutputTerminal) {
+            terminal.writeLine(formatStatsLine(m.name, status, result));
+        } else if (status === 'finished' && result) {
+            this.results.set(m.name, result);
         }
     }
 }
@@ -236,11 +277,11 @@ function describeProject(p: WorkspaceProject): string {
     return `${p.name} (${boardName})`;
 }
 
-export async function handleWorkspaceRunCommand(projectNames: string[]) {
+export async function handleWorkspaceRunCommand(projectNames: string[], options: { stats?: boolean } = {}) {
     let handler: WorkspaceRunHandler | undefined;
     let succeeded = false;
     try {
-        handler = new WorkspaceRunHandler(WorkspaceConfigHandler.find(cwd()), projectNames);
+        handler = new WorkspaceRunHandler(WorkspaceConfigHandler.find(cwd()), projectNames, options.stats);
         succeeded = await handler.run();
     } catch (error) {
         logger.error(`Failed to run BlueScript workspace.`);
@@ -258,5 +299,6 @@ export function registerWorkspaceRunCommand(program: Command) {
         .command('run')
         .description('run the projects in the workspace at the same time')
         .argument('[project-names...]', 'names of the projects to run (default: all projects)')
+        .option('--stats', 'print the execution time and the memory statistics of each project when it finishes')
         .action(handleWorkspaceRunCommand);
 }

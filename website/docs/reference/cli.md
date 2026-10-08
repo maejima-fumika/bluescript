@@ -134,8 +134,49 @@ When you run this command on a **host** project, the CLI compiles the project an
 | `--device-name` | `-d` | Bluetooth device name to connect to (default: `"BLUESCRIPT"`). **ESP32 only** — must match the name set during `bscript board flash-runtime`. Ignored for `host`. |
 | `--with-repl` | | After the entry file (`entryFile` in `bsconfig.json`) finishes, start a terminal REPL on the device. Cannot be combined with `--with-notebook`. |
 | `--with-notebook` | | After the entry file finishes, start the browser Notebook UI (default HTTP port `3000`). Cannot be combined with `--with-repl`. |
+| `--stats` | | When the entry file finishes, print its execution time and memory statistics. See [Execution statistics](#execution-statistics). |
 
 See the [REPL & Notebook tutorial](../tutorial/guides/repl.md) for usage details.
+
+When the entry file ends with a runtime error that the program does not catch, the CLI reports `The program ended with a runtime error.` and exits with status code `1`. With `--with-repl` or `--with-notebook`, the REPL or the notebook starts anyway, and the exit status code is not changed.
+
+#### Execution statistics
+
+With `--stats`, the CLI prints the execution time and the memory statistics of the project when its entry file finishes, after the program output. How they are printed depends on where the output goes.
+
+In a terminal, they are printed as a table of the projects whose entry file completed:
+
+```
+project   exec ms   GC runs   GC ms   alloc objects   alloc words   heap words
+sim         8.807        73   1.225         200,003       600,006        8,194
+```
+
+When the output is not a terminal (for example, piped to a file or to a script), they are printed as one line per project when it ends, also when it does not complete. The line always has the same format, so that a script can parse it:
+
+```
+STATS <project> status=<..> exec_ms=<..> gc_runs=<..> gc_ms=<..> alloc_words=<..> alloc_objects=<..> heap_words=<..>
+```
+
+| `status` | Meaning |
+| :--- | :--- |
+| `finished` | The entry file completed. |
+| `error` | The entry file ended with a runtime error that the program did not catch. The other values are those up to the error. |
+| `failed` | The CLI failed to run the program. The other values are `NA`. |
+| `disconnected` | The board was disconnected before the entry file completed. The other values are `NA`. |
+| `stopped` | The program was still running when `Ctrl-D` was typed. The other values are `NA`. |
+
+| Field (line) | Column (table) | Meaning |
+| :--- | :--- | :--- |
+| `exec_ms` | exec ms | The execution time of the entry file, in milliseconds. |
+| `gc_runs` | GC runs | How many times the garbage collector ran. |
+| `gc_ms` | GC ms | The total time the garbage collector took, in milliseconds. It is always `0.000` on Windows. |
+| `alloc_words` | alloc words | The total size of the objects allocated, in 4-byte words, including the object headers. |
+| `alloc_objects` | alloc objects | The number of objects allocated. |
+| `heap_words` | heap words | The size of the heap, in words (see [`BSCRIPT_HOST_HEAP_WORDS`](#host-heap-size)). |
+
+The values cover the whole entry file, including the time spent waiting in `receiveInteger` and the other receive functions. To measure part of a program, use [`performanceNow()`](./libraries/builtin.md#performancenow-float).
+
+Only the host runtime sends the statistics. On ESP32, every field except `exec_ms` is `NA` in the line and `–` in the table. Without `--stats`, nothing is printed and the output does not change.
 
 ---
 
@@ -230,11 +271,17 @@ bscript workspace remove sim
 Compiles the projects in the workspace and runs them at the same time. Run it anywhere inside the workspace directory.
 
 ```bash
-bscript workspace run [project-names...]
+bscript workspace run [project-names...] [options]
 ```
 
 **Arguments:**
 *   `[project-names...]`: Names of the projects to run. If omitted, every project in the workspace runs.
+
+**Options:**
+
+| Option | Alias | Description |
+| :--- | :--- | :--- |
+| `--stats` | | Print the execution time and memory statistics of each program. In a terminal, one table with a row for each finished project is printed when the command ends. Otherwise, a line `STATS <project> ...` without a project prefix is printed as soon as each program finishes. See [Execution statistics](#execution-statistics). |
 
 The CLI connects to every board, compiles and loads each project, and then starts all of the programs together. While it prepares the projects, it shows one line per project, updated in place:
 
@@ -271,7 +318,7 @@ INFO: Start executing programs. Type 'Ctrl-D' to exit.
 
 The top and the bottom stay in place; only the output area changes when you switch. The output area shows program output only: whether each project has finished or disconnected is shown at the bottom, and error messages from the CLI are printed below the screen when the command ends. When every program has finished, or when you type `Ctrl-D`, the output area switches back to every project and the screen is left as it is. Projects that were still running when you typed `Ctrl-D` are shown as `■ stopped`. When the output is not a terminal (for example, piped to a file), or the terminal is too short, the screen is not split: the steps and the output of every project are printed line by line.
 
-If any project fails before execution (for example, a compile error or a board that cannot be found), no program is started. After execution starts, a board that disconnects is reported and the other projects keep running; a board that disconnects after its program has finished is not reported. In a terminal, the command keeps running after every program has finished, so that you can still switch between the outputs, and ends when you type `Ctrl-D`. When the keys cannot be used (for example, when the output is piped), the command ends when every program has finished.
+If any project fails before execution (for example, a compile error or a board that cannot be found), no program is started. After execution starts, a board that disconnects is reported and the other projects keep running; a board that disconnects after its program has finished is not reported. A program that ends with a runtime error that it does not catch is reported as `Ended with a runtime error.` instead of `Finished.`, and is shown as `✖ failed` at the bottom. When any program fails, disconnects, or ends with a runtime error, the command exits with status code `1`. In a terminal, the command keeps running after every program has finished, so that you can still switch between the outputs, and ends when you type `Ctrl-D`. When the keys cannot be used (for example, when the output is piped), the command ends when every program has finished.
 
 The programs can exchange values (integers, floats, booleans, strings, null and arrays) with the built-in functions such as `sendInteger`, `broadcastString` and `receiveFloatArray` (see [Messages Between Projects](./libraries/builtin.md#messages-between-projects)). The programs never talk to each other directly: every message goes through the CLI, over the same connection that is used for program output. For example, with a workspace containing the projects `controller` and `actuator`:
 
@@ -320,6 +367,16 @@ bscript board setup <board-name>
 
 For `host`, see [Try Without Microcontroller](../tutorial/guides/try-without-microcontroller.md).
 
+#### Host heap size
+
+The heap of the host runtime is 8194 words (4 bytes each) by default. To build the host runtime with another size, set the environment variable `BSCRIPT_HOST_HEAP_WORDS` to the number of words when you run `bscript board setup host`, `bscript board build-runtime host`, or `bscript board update`. It must be an even number, 1024 or more:
+
+```bash
+BSCRIPT_HOST_HEAP_WORDS=1048576 bscript board setup host
+```
+
+The size is fixed when the runtime is built, so it does not matter whether the variable is set when the programs run. Building again without the variable goes back to the default size. `--stats` of `bscript project run` and `bscript workspace run` prints the size in `heap_words`.
+
 ---
 
 ### `bscript board flash-runtime`
@@ -347,6 +404,34 @@ bscript board flash-runtime esp32 --port /dev/ttyUSB0
 
 # Flash with a custom Bluetooth device name
 bscript board flash-runtime esp32 -d my-device
+```
+
+---
+
+### `bscript board build-runtime`
+
+Builds the BlueScript Runtime again from the runtime directory in the global config (`runtimeDir` in `~/.bluescript/config.json`). Run it after you change the source files of the runtime, such as `ports/host/std-module.c`. Otherwise programs are linked against the old runtime, and a built-in function added to the source cannot be found.
+
+```bash
+bscript board build-runtime <board-name> [options]
+```
+
+**Arguments:**
+*   `<board-name>`: The target board identifier (`esp32` or `host`).
+
+For `host`, the runtime and the shell are built in `ports/host/build` of the runtime directory, and the CLI uses that shell from then on. The heap size is given by `BSCRIPT_HOST_HEAP_WORDS` (see [Host heap size](#host-heap-size)).
+
+For `esp32`, the runtime is only built, not flashed. To flash it, use `bscript board flash-runtime`.
+
+**Options:**
+
+| Option | Alias | Description |
+| :--- | :--- | :--- |
+| `--device-name` | `-d` | Bluetooth device name built into the `esp32` runtime (default: `"BLUESCRIPT"`). Not used for `host`. |
+
+**Example:**
+```bash
+bscript board build-runtime host
 ```
 
 ---
@@ -406,6 +491,8 @@ Update the version of installed environments.
 ```bash
 bscript board update
 ```
+
+When `host` is set up, its runtime is built again, with the heap size given by `BSCRIPT_HOST_HEAP_WORDS` (see [Host heap size](#host-heap-size)).
 
 ---
 

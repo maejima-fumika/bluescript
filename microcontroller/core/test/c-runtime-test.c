@@ -885,6 +885,46 @@ void test_gc_write_barrier() {
     DELETE_ROOT_SET(root_set);
 }
 
+void test_gc_stats() {
+    struct gc_stats stats;
+    gc_initialize();
+    gc_stats_reset();
+    gc_get_stats(&stats);
+    Assert_equals(stats.runs, 0);
+    Assert_true(stats.gc_ms == 0.0);
+    Assert_true(stats.alloc_words == 0);
+    Assert_equals(stats.alloc_objects, 0);
+    Assert_equals(gc_heap_words(), HEAP_SIZE);
+
+    gc_new_fixedarray2(4);          // 1 header + 1 length + 4 elements
+    gc_get_stats(&stats);
+    Assert_equals(stats.alloc_objects, 1);
+    Assert_true(stats.alloc_words == 6);
+    Assert_equals(stats.runs, 0);
+
+    gc_run();
+    gc_get_stats(&stats);
+    Assert_equals(stats.runs, 1);
+    Assert_true(stats.gc_ms >= 0.0);
+
+    // Allocating more than the heap runs the garbage collector.
+    int n = HEAP_SIZE / 6 + 10;
+    for (int i = 0; i < n; i++)
+        gc_new_fixedarray2(4);
+
+    gc_get_stats(&stats);
+    Assert_true(stats.runs >= 2);
+    Assert_equals(stats.alloc_objects, n + 1);
+    Assert_true(stats.alloc_words == (uint64_t)(n + 1) * 6);
+
+    gc_stats_reset();
+    gc_get_stats(&stats);
+    Assert_equals(stats.runs, 0);
+    Assert_true(stats.gc_ms == 0.0);
+    Assert_true(stats.alloc_words == 0);
+    Assert_equals(stats.alloc_objects, 0);
+}
+
 void test_main() {
     test_converters();
     test_string();
@@ -905,6 +945,7 @@ void test_main() {
     test_gc_liveness2();
     test_gc_sweep();
     test_gc_write_barrier();
+    test_gc_stats();
 }
 
 int main() {

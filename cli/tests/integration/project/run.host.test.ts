@@ -7,6 +7,7 @@ import * as path from 'path';
 import { cwd } from '../../../src/core/command-exec';
 import * as fs from '../../../src/core/fs';
 import { handleRunCommand } from '../../../src/commands/project/run';
+import { logger } from '../../../src/core/logger';
 import {
     deleteGlobalEnv,
     setupGlobalEnvWithHostIntegration,
@@ -138,6 +139,86 @@ console.log(sum);
         expect(start).toBeGreaterThanOrEqual(0);
         expect(start).toBeLessThan(1);
         expect(end).toBeGreaterThanOrEqual(start);
+
+        stdout.restore();
+        exitSpy.mockRestore();
+    });
+
+    it('prints a STATS line after the output with --stats', async () => {
+        const exitSpy = mockProcessExit();
+        const stdout = captureStdout();
+
+        createHostProject(currentProjectRoot, {
+            'src/index.bs': 'console.log("hello from stats");',
+        }, HOST_INTEGRATION_RUNTIME_DIR);
+
+        await handleRunCommand({ withRepl: false, withNotebook: false, stats: true });
+
+        expectExitCode(exitSpy, 0, stdout);
+        const text = stdout.text();
+        expect(text).toMatch(/^STATS test-run status=finished exec_ms=\d+\.\d{3} gc_runs=\d+ gc_ms=\d+\.\d{3} alloc_words=\d+ alloc_objects=\d+ heap_words=\d+$/m);
+        expect(text.indexOf('STATS')).toBeGreaterThan(text.lastIndexOf('===='));
+
+        stdout.restore();
+        exitSpy.mockRestore();
+    });
+
+    it('prints a table of the statistics with --stats in a terminal', async () => {
+        const exitSpy = mockProcessExit();
+        const stdout = captureStdout();
+        // captureStdout treats stdout as not a terminal; restore() puts it back.
+        Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true, writable: true });
+
+        createHostProject(currentProjectRoot, {
+            'src/index.bs': 'console.log("hello from a terminal");',
+        }, HOST_INTEGRATION_RUNTIME_DIR);
+
+        await handleRunCommand({ withRepl: false, withNotebook: false, stats: true });
+
+        expectExitCode(exitSpy, 0, stdout);
+        const text = stdout.text().replace(/\u001b\[[0-9;]*m/g, '');
+        expect(text).not.toContain('STATS');
+        expect(text).toMatch(/^project +exec ms +GC runs +GC ms +alloc objects +alloc words +heap words$/m);
+        expect(text).toMatch(/^test-run +[\d,]+\.\d{3} +[\d,]+ +[\d,]+\.\d{3} +[\d,]+ +[\d,]+ +[\d,]+$/m);
+        expect(text.indexOf('project ')).toBeGreaterThan(text.lastIndexOf('===='));
+
+        stdout.restore();
+        exitSpy.mockRestore();
+    });
+
+    it('exits with an error when the program ends with a runtime error', async () => {
+        (logger.error as jest.Mock).mockClear();
+        const exitSpy = mockProcessExit();
+        const stdout = captureStdout();
+
+        createHostProject(currentProjectRoot, {
+            'src/index.bs': 'let a: integer[] = [1, 2];\nconsole.log(a[5]);\nconsole.log("unreachable");',
+        }, HOST_INTEGRATION_RUNTIME_DIR);
+
+        await handleRunCommand({ withRepl: false, withNotebook: false, stats: true });
+
+        expect(exitSpy).toHaveBeenCalledWith(1);
+        expect(logger.error).toHaveBeenCalledWith('The program ended with a runtime error.');
+        expect(stdout.text()).not.toContain('unreachable');
+        expect(stdout.text()).toMatch(/^STATS test-run status=error exec_ms=\d+\.\d{3} /m);
+
+        stdout.restore();
+        exitSpy.mockRestore();
+    });
+
+    it('prints no STATS line without --stats', async () => {
+        const exitSpy = mockProcessExit();
+        const stdout = captureStdout();
+
+        createHostProject(currentProjectRoot, {
+            'src/index.bs': 'console.log("hello without stats");',
+        }, HOST_INTEGRATION_RUNTIME_DIR);
+
+        await handleRunCommand({ withRepl: false, withNotebook: false });
+
+        expectExitCode(exitSpy, 0, stdout);
+        expect(stdout.text()).toContain('hello without stats');
+        expect(stdout.text()).not.toContain('STATS');
 
         stdout.restore();
         exitSpy.mockRestore();

@@ -27,14 +27,18 @@ typedef enum {
     H_PROTOCOL_REPLY = 9,
     H_PROTOCOL_REPLY_ERROR = 10,
     H_PROTOCOL_BROADCAST = 11,
+    // Statistics of the garbage collector, sent just before EXECTIME.
+    H_PROTOCOL_GCSTATS = 12,
 
     H_PROTOCOL_MAX
 } host_protocol_t;
 
 void bs_comm_send_log(char* message);
 void bs_comm_send_error(char* message);
-void bs_comm_send_exectime(float time);
+// error: 1 when the program ended with a runtime error, otherwise 0.
+void bs_comm_send_exectime(float time, int error);
 void bs_comm_send_loadtime(float time);
+void bs_comm_send_gcstats(uint32_t runs, double gc_ms, uint64_t alloc_words, uint32_t alloc_objects, uint32_t heap_words);
 // The type chars of a message value: <type char><text>, as in host-protocol.ts (formatHostValue).
 #define MSG_TYPE_INTEGER        'i'
 #define MSG_TYPE_FLOAT          'f'

@@ -2,6 +2,7 @@ import { BleConnection, DeviceService } from "../../services/ble/index";
 import { MemoryImage } from "@bscript/lang";
 import { ProgramOutput } from "../../core/program-output";
 import { BoardRuntime } from "./board-runtime";
+import { ExecResult } from "./exec-result";
 import { CompileContext } from "../compiler/compiler-adapter";
 import { answerBroadcast, answerReceive, answerSend, MessagePort, MessageReplier, MessageValue, NO_WORKSPACE_PORT } from "../messaging";
 
@@ -11,6 +12,8 @@ export class Esp32BoardRuntime implements BoardRuntime<MemoryImage> {
     private deviceService: DeviceService | null = null;
     private programOutput: ProgramOutput;
     private messagePort: MessagePort = NO_WORKSPACE_PORT;
+    /** Whether the board has sent an error since the current execution started. */
+    private errorReported = false;
 
     constructor(
         private deviceName: string,
@@ -38,7 +41,10 @@ export class Esp32BoardRuntime implements BoardRuntime<MemoryImage> {
 
         this.deviceService = this.ble.getService('device');
         this.deviceService.on('log', (message) => this.programOutput.write(message));
-        this.deviceService.on('error', (message) => this.programOutput.writeError(message));
+        this.deviceService.on('error', (message) => {
+            this.errorReported = true;
+            this.programOutput.writeError(message);
+        });
         const deviceService = this.deviceService;
         // Memory is scarce on the board, so it only gets the short text.
         const replier: MessageReplier = {
@@ -77,11 +83,15 @@ export class Esp32BoardRuntime implements BoardRuntime<MemoryImage> {
         return this.deviceService.load(output, onPacketSent);
     }
 
-    async execute(output: MemoryImage): Promise<number> {
+    async execute(output: MemoryImage): Promise<ExecResult> {
         if (!this.ble || !this.deviceService) {
             throw new Error('Failed to execute binary. BLE is not connected.');
         }
-        return this.deviceService.execute(output);
+        // A runtime error is sent before the exectime, over the same connection.
+        this.errorReported = false;
+        const exectime = await this.deviceService.execute(output);
+        // The board does not send the statistics of its garbage collector.
+        return { exectime, error: this.errorReported };
     }
 
     setOutput(output: ProgramOutput): void {

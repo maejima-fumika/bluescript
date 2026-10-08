@@ -2,7 +2,7 @@ import { logger } from "../core/logger";
 import { Connection, ConnectionMessage, Service } from "./common";
 import {
     HOST_MAX_PAYLOAD_SIZE, hostProtocolBuilder, hostReplyBuilder, hostReplyErrorBuilder, hostValueSize,
-    HostProtocolParser, HostProtocol, HostParseResult,
+    HostProtocolParser, HostProtocol, HostParseResult, GcStats,
 } from "./protocol/host-protocol";
 import { MessageType, MessageValue } from "./protocol/message-value";
 import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
@@ -11,8 +11,9 @@ import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 export type HostServiceEvents = {
     log: (message: string) => void;
     error: (message: string) => void;
-    exectime: (time: number) => void;
+    exectime: (time: number, error: boolean) => void;
     loadtime: (time: number) => void;
+    gcstats: (stats: GcStats) => void;
     send: (dst: string, tag: string, message: MessageValue) => void;
     receive: (src: string, tag: string, expected: MessageType) => void;
     broadcast: (tag: string, message: MessageValue) => void;
@@ -43,16 +44,22 @@ export class HostService extends Service<HostServiceEvents, string> {
         });
     }
 
-    public async execute(entryPointName: string): Promise<number> {
+    public async execute(entryPointName: string): Promise<{ exectime: number; error: boolean; gcStats?: GcStats }> {
         const line = hostProtocolBuilder(HostProtocol.Call, entryPointName);
         await this.send('execute', [line]);
-        return new Promise<number>((resolve) => {
-            this.on('exectime', (time) => {
+        return new Promise((resolve) => {
+            // The shell sends the statistics just before the exectime.
+            let gcStats: GcStats | undefined;
+            this.on('gcstats', (stats) => {
+                gcStats = stats;
+            });
+            this.on('exectime', (time, error) => {
                 // A runtime error is written to stderr just before the exectime on stdout,
                 // but the two pipes are read independently. Waiting one turn of the event
                 // loop lets the error be reported before the caller treats the run as done.
-                setImmediate(() => resolve(time));
+                setImmediate(() => resolve({ exectime: time, error, gcStats }));
                 this.off('exectime');
+                this.off('gcstats');
             });
         });
     }
@@ -108,10 +115,13 @@ class HostMessageQueue {
                     this.service.handleMessage('error', [message.error]);
                     break;
                 case HostProtocol.Exectime:
-                    this.service.handleMessage('exectime', [message.time]);
+                    this.service.handleMessage('exectime', [message.time, message.error]);
                     break;
                 case HostProtocol.Loadtime:
                     this.service.handleMessage('loadtime', [message.time]);
+                    break;
+                case HostProtocol.GcStats:
+                    this.service.handleMessage('gcstats', [message.stats]);
                     break;
                 case HostProtocol.Send:
                     this.service.handleMessage('send', [message.dst, message.tag, message.message]);

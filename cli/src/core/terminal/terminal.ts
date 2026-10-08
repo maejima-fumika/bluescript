@@ -45,6 +45,11 @@ export class Terminal {
         return Boolean(this.stdin.isTTY);
     }
 
+    /** Whether stdout is a terminal, not a pipe or a file. */
+    get isOutputTerminal(): boolean {
+        return Boolean(this.stdout.isTTY);
+    }
+
     get columns(): number | undefined {
         return this.stdout.columns;
     }
